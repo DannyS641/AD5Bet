@@ -43,6 +43,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2176bce0-7465-493c-a437-36ad82763bc6"
+      }
+    },
+    "owner": "sauce.js"
   }
 }
