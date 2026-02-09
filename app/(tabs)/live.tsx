@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Brand } from "@/constants/brand";
 import { useBetSlip } from "@/context/BetSlipContext";
 import { OddsEvent, fetchFeaturedOdds } from "@/lib/odds-api";
+import { BetSlipFab } from "@/components/BetSlipFab";
 
 export default function LiveScreen() {
   const { addSelection } = useBetSlip();
@@ -98,6 +99,7 @@ export default function LiveScreen() {
           );
         })}
       </ScrollView>
+      <BetSlipFab />
     </View>
   );
 }

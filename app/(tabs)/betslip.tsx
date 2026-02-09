@@ -11,7 +11,7 @@ import { supabase } from "@/lib/supabase";
 
 export default function BetSlipScreen() {
   const router = useRouter();
-  const { selections, stake, setStake, totalOdds, potentialWin, removeSelection, clearSelections } = useBetSlip();
+  const { selections, stake, setStake, totalOdds, potentialWin, removeSelection, clearSelections, undoLastAction, canUndo } = useBetSlip();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(false);
@@ -114,6 +114,12 @@ export default function BetSlipScreen() {
             <Text style={styles.summaryWin}>₦{potentialWin.toLocaleString()}</Text>
           </View>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {canUndo ? (
+            <Pressable style={styles.undoButton} onPress={undoLastAction}>
+              <MaterialIcons name="undo" size={16} color={Brand.navy} />
+              <Text style={styles.undoText}>Undo</Text>
+            </Pressable>
+          ) : null}
           <Pressable style={styles.placeBet} onPress={handlePlaceBet} disabled={loading}>
             {loading ? (
               <ActivityIndicator color={Brand.card} />
@@ -256,5 +262,22 @@ const styles = StyleSheet.create({
     color: "#d15353",
     fontWeight: "600",
     marginTop: 8,
+  },
+  undoButton: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: Brand.background,
+    borderWidth: 1,
+    borderColor: Brand.border,
+  },
+  undoText: {
+    color: Brand.navy,
+    fontWeight: "700",
   },
 });

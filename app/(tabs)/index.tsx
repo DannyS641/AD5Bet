@@ -17,6 +17,7 @@ import { Brand } from "@/constants/brand";
 import { useBetSlip } from "@/context/BetSlipContext";
 import { useAuth } from "@/context/AuthContext";
 import { OddsEvent, OddsMarket, fetchEventMarkets, fetchFeaturedOdds } from "@/lib/odds-api";
+import { BetSlipFab } from "@/components/BetSlipFab";
 import { supabase } from "@/lib/supabase";
 
 const isWeb = Platform.OS === "web";
@@ -337,6 +338,7 @@ export default function HomeScreen() {
           )}
         </ScrollView>
       </View>
+      <BetSlipFab />
     </View>
   );
 }
