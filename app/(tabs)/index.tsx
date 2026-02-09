@@ -60,7 +60,6 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [marketKey, setMarketKey] = useState("h2h");
-  const [profileName, setProfileName] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
 
@@ -69,18 +68,15 @@ export default function HomeScreen() {
 
     const loadProfile = async () => {
       if (!user) {
-        setProfileName(null);
         setWalletBalance(null);
         setProfileLoading(false);
         return;
       }
       setProfileLoading(true);
-      const [{ data: profile }, { data: wallet }] = await Promise.all([
-        supabase.from("profiles").select("full_name").eq("id", user.id).single(),
+      const [{ data: wallet }] = await Promise.all([
         supabase.from("wallets").select("balance").eq("user_id", user.id).single(),
       ]);
       if (!mounted) return;
-      setProfileName(profile?.full_name ?? user.email ?? null);
       setWalletBalance(wallet?.balance ?? 0);
       setProfileLoading(false);
     };
@@ -222,6 +218,9 @@ export default function HomeScreen() {
             <Text style={styles.subtle}>Fast bets. Smart picks.</Text>
           </View>
           <View style={styles.topActions}>
+            <Pressable style={styles.iconBtn} accessibilityLabel="Search">
+              <MaterialIcons name="search" size={20} color={Brand.navy} />
+            </Pressable>
             {!user ? (
               <>
                 <Link href="/login" asChild>
@@ -236,22 +235,17 @@ export default function HomeScreen() {
                 </Link>
               </>
             ) : (
-              <View style={styles.profileWrap}>
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileName} numberOfLines={1}>
-                    {profileLoading ? "Loading..." : profileName ?? "Account"}
-                  </Text>
-                  <Text style={styles.profileBalance}>
-                    {"\u20A6"}
-                    {walletBalance?.toLocaleString() ?? "0"}
-                  </Text>
-                </View>
-                <Link href="/(tabs)/account" asChild>
-                  <Pressable style={styles.profileBtn} accessibilityLabel="Open profile">
-                    <MaterialIcons name="account-circle" size={20} color={Brand.navy} />
-                  </Pressable>
-                </Link>
-              </View>
+              <Link href="/(tabs)/account" asChild>
+                <Pressable style={styles.balancePill} accessibilityLabel="Open account">
+                  <MaterialIcons name="account-circle" size={22} color={Brand.navy} />
+                  <View>
+                    <Text style={styles.balanceValue}>
+                      {"\u20A6"}
+                      {profileLoading ? "..." : walletBalance?.toLocaleString() ?? "0"}
+                    </Text>
+                  </View>
+                </Pressable>
+              </Link>
             )}
           </View>
         </View>
@@ -375,34 +369,31 @@ const styles = StyleSheet.create({
     gap: 10,
     alignItems: "center",
   },
-  profileWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  profileInfo: {
-    alignItems: "flex-end",
-    maxWidth: 160,
-  },
-  profileName: {
-    color: Brand.navy,
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  profileBalance: {
-    color: Brand.muted,
-    fontWeight: "600",
-    fontSize: 12,
-    marginTop: 2,
-  },
-  profileBtn: {
+  iconBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: Brand.navy,
+    borderColor: Brand.border,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: Brand.card,
+  },
+  balancePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Brand.border,
+    backgroundColor: Brand.card,
+  },
+  balanceValue: {
+    fontSize: 12,
+    color: Brand.navy,
+    fontWeight: "800",
   },
   loginBtn: {
     paddingHorizontal: 14,
