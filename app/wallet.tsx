@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { StyleSheet, Text, View, TextInput, Pressable, ActivityIndicator } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
 import { supabase } from "@/lib/supabase";
@@ -9,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 
 export default function WalletScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [balance, setBalance] = useState(0);
   const [amount, setAmount] = useState("2000");
   const [loading, setLoading] = useState(false);
@@ -76,7 +78,7 @@ export default function WalletScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: 24 + insets.top }]}>
       <Text style={styles.title}>Wallet</Text>
       <Text style={styles.subtitle}>Add funds to place bets instantly.</Text>
 

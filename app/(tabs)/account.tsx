@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, Pressable, TextInput, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Link, useRouter } from 'expo-router';
 import QRCode from 'react-native-qrcode-svg';
@@ -11,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 export default function AccountScreen() {
   const router = useRouter();
   const { user, signOut, refreshMfaStatus } = useAuth();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(false);
   const [profileName, setProfileName] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -91,7 +93,7 @@ export default function AccountScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top }]}>
         <Text style={styles.title}>Account</Text>
         <MaterialIcons name="person" size={22} color={Brand.navy} />
       </View>
@@ -125,6 +127,9 @@ export default function AccountScreen() {
                 <Text style={styles.primaryText}>Top up</Text>
               </Pressable>
             </Link>
+            <Pressable style={styles.secondaryBtn} onPress={() => router.push('/withdraw')}>
+              <Text style={styles.secondaryText}>Withdraw</Text>
+            </Pressable>
             <Pressable style={styles.secondaryBtn} onPress={handleSignOut}>
               <Text style={styles.secondaryText}>Sign out</Text>
             </Pressable>

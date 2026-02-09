@@ -11,10 +11,13 @@ import {
 } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Link } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
 import { useBetSlip } from "@/context/BetSlipContext";
+import { useAuth } from "@/context/AuthContext";
 import { OddsEvent, OddsMarket, fetchEventMarkets, fetchFeaturedOdds } from "@/lib/odds-api";
+import { supabase } from "@/lib/supabase";
 
 const isWeb = Platform.OS === "web";
 
@@ -50,11 +53,43 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const isLargeScreen = width > 768;
   const { addSelection, selections } = useBetSlip();
+  const { user } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [featured, setFeatured] = useState<OddsEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [marketKey, setMarketKey] = useState("h2h");
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadProfile = async () => {
+      if (!user) {
+        setProfileName(null);
+        setWalletBalance(null);
+        setProfileLoading(false);
+        return;
+      }
+      setProfileLoading(true);
+      const [{ data: profile }, { data: wallet }] = await Promise.all([
+        supabase.from("profiles").select("full_name").eq("id", user.id).single(),
+        supabase.from("wallets").select("balance").eq("user_id", user.id).single(),
+      ]);
+      if (!mounted) return;
+      setProfileName(profile?.full_name ?? user.email ?? null);
+      setWalletBalance(wallet?.balance ?? 0);
+      setProfileLoading(false);
+    };
+
+    loadProfile();
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
 
   useEffect(() => {
     let mounted = true;
@@ -110,7 +145,7 @@ export default function HomeScreen() {
     },
     topBar: {
       ...styles.topBar,
-      paddingTop: isWeb ? 24 : 16,
+      paddingTop: (isWeb ? 24 : 16) + insets.top,
       paddingHorizontal: isWeb && isLargeScreen ? 32 : 20,
     },
     brand: {
@@ -187,16 +222,37 @@ export default function HomeScreen() {
             <Text style={styles.subtle}>Fast bets. Smart picks.</Text>
           </View>
           <View style={styles.topActions}>
-            <Link href="/login" asChild>
-              <Pressable style={styles.loginBtn}>
-                <Text style={styles.loginText}>Login</Text>
-              </Pressable>
-            </Link>
-            <Link href="/register" asChild>
-              <Pressable style={styles.registerBtn}>
-                <Text style={styles.registerText}>Register</Text>
-              </Pressable>
-            </Link>
+            {!user ? (
+              <>
+                <Link href="/login" asChild>
+                  <Pressable style={styles.loginBtn}>
+                    <Text style={styles.loginText}>Login</Text>
+                  </Pressable>
+                </Link>
+                <Link href="/register" asChild>
+                  <Pressable style={styles.registerBtn}>
+                    <Text style={styles.registerText}>Register</Text>
+                  </Pressable>
+                </Link>
+              </>
+            ) : (
+              <View style={styles.profileWrap}>
+                <View style={styles.profileInfo}>
+                  <Text style={styles.profileName} numberOfLines={1}>
+                    {profileLoading ? "Loading..." : profileName ?? "Account"}
+                  </Text>
+                  <Text style={styles.profileBalance}>
+                    {"\u20A6"}
+                    {walletBalance?.toLocaleString() ?? "0"}
+                  </Text>
+                </View>
+                <Link href="/(tabs)/account" asChild>
+                  <Pressable style={styles.profileBtn} accessibilityLabel="Open profile">
+                    <MaterialIcons name="account-circle" size={20} color={Brand.navy} />
+                  </Pressable>
+                </Link>
+              </View>
+            )}
           </View>
         </View>
 
@@ -228,7 +284,9 @@ export default function HomeScreen() {
                 style={[styles.quickChip, marketKey === pick.key && styles.quickChipActive]}
                 onPress={() => setMarketKey(pick.key)}
               >
-                <Text style={[styles.quickText, marketKey === pick.key && styles.quickTextActive]}>{pick.label}</Text>
+                <Text style={[styles.quickText, marketKey === pick.key && styles.quickTextActive]}>
+                  {pick.label}
+                </Text>
               </Pressable>
             ))}
           </View>
@@ -315,6 +373,36 @@ const styles = StyleSheet.create({
   topActions: {
     flexDirection: "row",
     gap: 10,
+    alignItems: "center",
+  },
+  profileWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  profileInfo: {
+    alignItems: "flex-end",
+    maxWidth: 160,
+  },
+  profileName: {
+    color: Brand.navy,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  profileBalance: {
+    color: Brand.muted,
+    fontWeight: "600",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  profileBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Brand.navy,
+    alignItems: "center",
+    justifyContent: "center",
   },
   loginBtn: {
     paddingHorizontal: 14,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, Pressable, ActivityIndicator } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
 import { useBetSlip } from "@/context/BetSlipContext";
@@ -8,6 +9,7 @@ import { OddsEvent, fetchFeaturedOdds } from "@/lib/odds-api";
 
 export default function LiveScreen() {
   const { addSelection } = useBetSlip();
+  const insets = useSafeAreaInsets();
   const [liveMatches, setLiveMatches] = useState<OddsEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export default function LiveScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 16 + insets.top }]}>
         <Text style={styles.title}>Live Matches</Text>
         <View style={styles.pill}>
           <MaterialIcons name="circle" size={10} color={Brand.green} />

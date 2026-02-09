@@ -1,7 +1,6 @@
 export const Config = {
   supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL ?? "",
   supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "",
-  oddsApiKey: process.env.EXPO_PUBLIC_ODDS_API_KEY ?? "",
   paystackPublicKey: process.env.EXPO_PUBLIC_PAYSTACK_PUBLIC_KEY ?? "",
 };
 

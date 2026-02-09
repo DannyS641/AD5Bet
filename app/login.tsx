@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Link, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
 import { useAuth } from "@/context/AuthContext";
@@ -15,6 +16,7 @@ import { useAuth } from "@/context/AuthContext";
 export default function LoginScreen() {
   const router = useRouter();
   const { signInWithPassword } = useAuth();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -36,11 +38,11 @@ export default function LoginScreen() {
       return;
     }
 
-    router.replace("/(tabs)");
+    router.replace("/(tabs)/account");
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: 24 + insets.top }]}>
       <Text style={styles.title}>Welcome back</Text>
       <Text style={styles.subtitle}>Login to manage your bets and wallet.</Text>
 

@@ -1,0 +1,2 @@
+[functions."Odds-API"]
+verify_jwt = false

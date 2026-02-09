@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, Text, TextInput, View, Pressable, ActivityIndicator } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Brand } from '@/constants/brand';
 import { useAuth } from '@/context/AuthContext';
@@ -8,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 export default function RegisterScreen() {
   const router = useRouter();
   const { signUpWithPassword } = useAuth();
+  const insets = useSafeAreaInsets();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,11 +25,11 @@ export default function RegisterScreen() {
       setError(errorMessage);
       return;
     }
-    router.replace('/(tabs)');
+    router.replace('/(tabs)/account');
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: 24 + insets.top }]}>
       <Text style={styles.title}>Create account</Text>
       <Text style={styles.subtitle}>Join AD5BET to access live odds and jackpots.</Text>
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, Text, TextInput, View, Pressable, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
 import { supabase } from "@/lib/supabase";
@@ -9,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 export default function MfaScreen() {
   const router = useRouter();
   const { refreshMfaStatus } = useAuth();
+  const insets = useSafeAreaInsets();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -47,7 +49,7 @@ export default function MfaScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: 24 + insets.top }]}>
       <Text style={styles.title}>Two-Factor Verification</Text>
       <Text style={styles.subtitle}>Enter the 6-digit code from your authenticator app.</Text>
 

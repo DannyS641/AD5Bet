@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, View, Pressable, TextInput, ActivityIndicator } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useRouter } from "expo-router";
 
@@ -12,6 +13,7 @@ export default function BetSlipScreen() {
   const router = useRouter();
   const { selections, stake, setStake, totalOdds, potentialWin, removeSelection, clearSelections } = useBetSlip();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,7 +68,7 @@ export default function BetSlipScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 16 + insets.top }]}>
         <Text style={styles.title}>Bet Slip</Text>
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{selections.length}</Text>

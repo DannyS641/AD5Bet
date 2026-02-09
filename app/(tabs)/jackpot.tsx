@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { Brand } from '@/constants/brand';
@@ -10,9 +11,10 @@ const jackpots = [
 ];
 
 export default function JackpotScreen() {
+  const insets = useSafeAreaInsets();
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 16 + insets.top }]}>
         <Text style={styles.title}>Jackpot</Text>
         <MaterialIcons name="emoji-events" size={22} color={Brand.navy} />
       </View>

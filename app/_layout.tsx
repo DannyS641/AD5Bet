@@ -22,6 +22,7 @@ export default function RootLayout() {
           <Stack.Screen name="register" options={{ title: 'Register' }} />
           <Stack.Screen name="mfa" options={{ title: 'Two-Factor' }} />
           <Stack.Screen name="wallet" options={{ title: 'Wallet' }} />
+          <Stack.Screen name="withdraw" options={{ title: 'Withdraw' }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <StatusBar style="auto" />

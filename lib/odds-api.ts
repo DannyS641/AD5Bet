@@ -1,4 +1,4 @@
-import { Config } from "./config";
+import { supabase } from "./supabase";
 
 export type OddsMarketOutcome = {
   name: string;
@@ -21,28 +21,20 @@ export type OddsEvent = {
   markets: OddsMarket[];
 };
 
-const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
+const ODDS_FUNCTION = "Odds-API";
 
 async function oddsApiFetch<T>(path: string, params: Record<string, string>) {
-  if (!Config.oddsApiKey) {
-    throw new Error("Missing EXPO_PUBLIC_ODDS_API_KEY");
-  }
-
-  const url = new URL(`${ODDS_API_BASE}${path}`);
-  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      "Content-Type": "application/json",
-    },
+  const { data, error } = await supabase.functions.invoke(ODDS_FUNCTION, {
+    body: { path, params },
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Odds API error ${response.status}: ${text}`);
+  if (error) {
+    const context = (error as { context?: { status?: number } }).context;
+    const suffix = context?.status ? ` (status ${context.status})` : "";
+    throw new Error(`${error.message}${suffix}`);
   }
 
-  return (await response.json()) as T;
+  return data as T;
 }
 
 type OddsApiMarket = {
@@ -83,7 +75,6 @@ function pickMarkets(bookmakers: OddsApiBookmaker[] | undefined) {
 
 export async function fetchFeaturedOdds(sportKey = "soccer_epl") {
   const data = await oddsApiFetch<OddsApiEvent[]>(`/sports/${sportKey}/odds`, {
-    apiKey: Config.oddsApiKey,
     regions: DEFAULT_REGIONS,
     markets: "h2h,totals,spreads",
     oddsFormat: DEFAULT_ODDS_FORMAT,
@@ -103,7 +94,6 @@ export async function fetchFeaturedOdds(sportKey = "soccer_epl") {
 
 export async function fetchEventMarkets(eventId: string, sportKey: string) {
   const data = await oddsApiFetch<OddsApiEvent[]>(`/sports/${sportKey}/events/${eventId}/odds`, {
-    apiKey: Config.oddsApiKey,
     regions: DEFAULT_REGIONS,
     markets: "h2h,totals,spreads,btts,draw_no_bet,h2h_3_way",
     oddsFormat: DEFAULT_ODDS_FORMAT,
