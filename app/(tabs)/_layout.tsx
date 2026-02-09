@@ -1,11 +1,21 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
+import { Tabs, useRouter } from 'expo-router';
+import React, { useEffect } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { Brand } from '@/constants/brand';
+import { useAuth } from '@/context/AuthContext';
 
 export default function TabLayout() {
+  const router = useRouter();
+  const { needsMfa } = useAuth();
+
+  useEffect(() => {
+    if (needsMfa) {
+      router.replace('/mfa');
+    }
+  }, [needsMfa, router]);
+
   return (
     <Tabs
       screenOptions={{

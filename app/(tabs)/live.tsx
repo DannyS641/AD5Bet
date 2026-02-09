@@ -1,15 +1,42 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useEffect, useState } from "react";
+import { ScrollView, StyleSheet, Text, View, Pressable, ActivityIndicator } from "react-native";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
-import { Brand } from '@/constants/brand';
-
-const liveMatches = [
-  { league: 'Premier League', minute: "12'", home: 'Everton', away: 'Newcastle', score: '0 - 0' },
-  { league: 'La Liga', minute: "44'", home: 'Real Madrid', away: 'Valencia', score: '1 - 0' },
-  { league: 'Ligue 1', minute: "58'", home: 'Lyon', away: 'Marseille', score: '2 - 2' },
-];
+import { Brand } from "@/constants/brand";
+import { useBetSlip } from "@/context/BetSlipContext";
+import { OddsEvent, fetchFeaturedOdds } from "@/lib/odds-api";
 
 export default function LiveScreen() {
+  const { addSelection } = useBetSlip();
+  const [liveMatches, setLiveMatches] = useState<OddsEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadLive = async () => {
+      try {
+        setLoading(true);
+        const events = await fetchFeaturedOdds("soccer_epl");
+        const live = events.filter((event) => new Date(event.commenceTime).getTime() <= Date.now());
+        if (!mounted) return;
+        setLiveMatches(live);
+        setError(null);
+      } catch (err) {
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : "Unable to load live matches.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    loadLive();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -20,29 +47,54 @@ export default function LiveScreen() {
         </View>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
-        {liveMatches.map((match) => (
-          <View key={match.home} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.league}>{match.league}</Text>
-              <Text style={styles.minute}>{match.minute}</Text>
-            </View>
-            <Text style={styles.teams}>{match.home} {match.score} {match.away}</Text>
-            <View style={styles.actionRow}>
-              <View style={styles.actionPill}>
-                <Text style={styles.actionText}>1</Text>
-              </View>
-              <View style={styles.actionPill}>
-                <Text style={styles.actionText}>X</Text>
-              </View>
-              <View style={styles.actionPill}>
-                <Text style={styles.actionText}>2</Text>
-              </View>
-              <View style={[styles.actionPill, styles.actionMore]}>
-                <Text style={[styles.actionText, styles.actionTextInverse]}>+ 48</Text>
-              </View>
-            </View>
+        {loading ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator color={Brand.navy} />
+            <Text style={styles.loadingText}>Checking live games...</Text>
           </View>
-        ))}
+        ) : null}
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {!loading && liveMatches.length === 0 ? (
+          <Text style={styles.emptyText}>No live fixtures yet.</Text>
+        ) : null}
+        {liveMatches.map((match) => {
+          const h2hMarket = match.markets.find((market) => market.key === "h2h");
+          return (
+            <View key={match.id} style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.league}>{match.sportTitle}</Text>
+                <Text style={styles.minute}>Live</Text>
+              </View>
+              <Text style={styles.teams}>
+                {match.homeTeam} vs {match.awayTeam}
+              </Text>
+              <View style={styles.actionRow}>
+                {h2hMarket?.outcomes?.map((outcome) => (
+                  <Pressable
+                    key={`${match.id}-${outcome.name}`}
+                    style={styles.actionPill}
+                    onPress={() =>
+                      addSelection({
+                        id: `${match.id}-h2h-${outcome.name}`,
+                        eventId: match.id,
+                        sportKey: match.sportKey,
+                        league: match.sportTitle,
+                        match: `${match.homeTeam} vs ${match.awayTeam}`,
+                        market: "h2h",
+                        outcome: outcome.name,
+                        odds: outcome.price,
+                        commenceTime: match.commenceTime,
+                      })
+                    }
+                  >
+                    <Text style={styles.actionText}>{outcome.name}</Text>
+                    <Text style={styles.actionOdd}>{outcome.price}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -60,27 +112,27 @@ const styles = StyleSheet.create({
     backgroundColor: Brand.card,
     borderBottomColor: Brand.border,
     borderBottomWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   title: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: "800",
     color: Brand.navy,
   },
   pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 14,
-    backgroundColor: '#eef7f0',
+    backgroundColor: "#eef7f0",
   },
   pillText: {
     color: Brand.green,
-    fontWeight: '700',
+    fontWeight: "700",
     fontSize: 12,
   },
   content: {
@@ -95,13 +147,13 @@ const styles = StyleSheet.create({
     borderColor: Brand.border,
   },
   cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 8,
   },
   league: {
     color: Brand.muted,
-    fontWeight: '600',
+    fontWeight: "600",
     fontSize: 12,
   },
   minute: {
@@ -110,11 +162,12 @@ const styles = StyleSheet.create({
   },
   teams: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: "700",
     color: Brand.text,
   },
   actionRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     marginTop: 12,
   },
@@ -125,17 +178,37 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderWidth: 1,
     borderColor: Brand.border,
-  },
-  actionMore: {
-    backgroundColor: Brand.navy,
-    borderColor: Brand.navy,
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
   },
   actionText: {
     color: Brand.navy,
-    fontWeight: '700',
+    fontWeight: "700",
     fontSize: 12,
   },
-  actionTextInverse: {
-    color: Brand.card,
+  actionOdd: {
+    color: Brand.muted,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  loadingText: {
+    color: Brand.muted,
+    fontWeight: "600",
+  },
+  errorText: {
+    color: "#d15353",
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  emptyText: {
+    color: Brand.muted,
+    fontStyle: "italic",
   },
 });

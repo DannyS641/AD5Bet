@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -6,69 +7,94 @@ import {
   Pressable,
   Platform,
   useWindowDimensions,
+  ActivityIndicator,
 } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { Link } from "expo-router";
 
 import { Brand } from "@/constants/brand";
-import { Link } from "expo-router";
+import { useBetSlip } from "@/context/BetSlipContext";
+import { OddsEvent, OddsMarket, fetchEventMarkets, fetchFeaturedOdds } from "@/lib/odds-api";
 
 const isWeb = Platform.OS === "web";
 
-const quickPicks = [
-  "1X2",
-  "O/U 2.5",
-  "GG/NG",
-  "Handicap",
-  "1st Half",
-  "Corners",
+const marketOptions = [
+  { key: "h2h", label: "1X2" },
+  { key: "totals", label: "O/U 2.5" },
+  { key: "btts", label: "BTTS" },
+  { key: "draw_no_bet", label: "Draw No Bet" },
+  { key: "h2h_3_way", label: "3-Way" },
+  { key: "spreads", label: "Handicap" },
 ];
 
-const featuredMatches = [
-  {
-    league: "Premier League",
-    time: "Today 18:30",
-    home: "Arsenal",
-    away: "Chelsea",
-    odds: ["1.88", "3.55", "4.20"],
-  },
-  {
-    league: "La Liga",
-    time: "Today 20:00",
-    home: "Barcelona",
-    away: "Sevilla",
-    odds: ["1.52", "4.10", "6.30"],
-  },
-  {
-    league: "Serie A",
-    time: "Tomorrow 17:00",
-    home: "Milan",
-    away: "Napoli",
-    odds: ["2.20", "3.20", "3.40"],
-  },
-];
+function formatMatchTime(iso: string) {
+  const date = new Date(iso);
+  return date.toLocaleString(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-const liveMatches = [
-  {
-    league: "UCL",
-    minute: "63'",
-    home: "PSG",
-    away: "Inter",
-    score: "1 - 1",
-    odds: ["2.10", "2.60", "3.80"],
-  },
-  {
-    league: "Bundesliga",
-    minute: "78'",
-    home: "Dortmund",
-    away: "Leverkusen",
-    score: "2 - 0",
-    odds: ["1.60", "3.80", "5.20"],
-  },
-];
+function mergeMarkets(primary: OddsMarket[], extra: OddsMarket[]) {
+  const map = new Map(primary.map((market) => [market.key, market]));
+  extra.forEach((market) => {
+    if (!map.has(market.key)) {
+      map.set(market.key, market);
+    }
+  });
+  return Array.from(map.values());
+}
 
 export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const isLargeScreen = width > 768;
+  const { addSelection, selections } = useBetSlip();
+
+  const [featured, setFeatured] = useState<OddsEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [marketKey, setMarketKey] = useState("h2h");
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadOdds = async () => {
+      try {
+        setLoading(true);
+        const baseEvents = await fetchFeaturedOdds("soccer_epl");
+        const enriched = await Promise.all(
+          baseEvents.slice(0, 8).map(async (event) => {
+            try {
+              const extra = await fetchEventMarkets(event.id, event.sportKey);
+              if (!extra) return event;
+              return { ...event, markets: mergeMarkets(event.markets, extra.markets) };
+            } catch {
+              return event;
+            }
+          })
+        );
+        if (!mounted) return;
+        setFeatured(enriched);
+        setError(null);
+      } catch (err) {
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : "Unable to load matches.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    loadOdds();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const liveMatches = useMemo(
+    () => featured.filter((match) => new Date(match.commenceTime).getTime() <= Date.now()),
+    [featured]
+  );
 
   const dynamicStyles = {
     wrapper: {
@@ -79,7 +105,7 @@ export default function HomeScreen() {
     innerContainer: {
       flex: 1,
       width: "100%" as const,
-      maxWidth: isWeb && isLargeScreen ? 800 : undefined,
+      maxWidth: isWeb && isLargeScreen ? 840 : undefined,
       backgroundColor: Brand.background,
     },
     topBar: {
@@ -113,6 +139,45 @@ export default function HomeScreen() {
     },
   };
 
+  const renderOdds = (match: OddsEvent) => {
+    const market = match.markets.find((item) => item.key === marketKey);
+    if (!market) {
+      return <Text style={styles.emptyOdds}>Market not available</Text>;
+    }
+
+    return (
+      <View style={styles.oddsRow}>
+        {market.outcomes.map((odd) => {
+          const selectionId = `${match.id}-${market.key}-${odd.name}`;
+          const isSelected = selections.some((item) => item.id === selectionId);
+
+          return (
+            <Pressable
+              key={selectionId}
+              style={[styles.oddPill, isSelected && styles.oddPillActive]}
+              onPress={() =>
+                addSelection({
+                  id: selectionId,
+                  eventId: match.id,
+                  sportKey: match.sportKey,
+                  league: match.sportTitle,
+                  match: `${match.homeTeam} vs ${match.awayTeam}`,
+                  market: market.key,
+                  outcome: odd.name,
+                  odds: odd.price,
+                  commenceTime: match.commenceTime,
+                })
+              }
+            >
+              <Text style={[styles.oddLabel, isSelected && styles.oddLabelActive]}>{odd.name}</Text>
+              <Text style={[styles.oddValue, isSelected && styles.oddValueActive]}>{odd.price}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  };
+
   return (
     <View style={dynamicStyles.wrapper}>
       <View style={dynamicStyles.innerContainer}>
@@ -135,24 +200,15 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={dynamicStyles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={dynamicStyles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={dynamicStyles.hero}>
             <View style={styles.heroLeft}>
-              <Text style={styles.heroLabel}>Today’s Boost</Text>
+              <Text style={styles.heroLabel}>Today's Boost</Text>
               <Text style={dynamicStyles.heroTitle}>Super Sunday Combo</Text>
-              <Text style={styles.heroCopy}>
-                Stake ₦500 and win up to ₦120,000 with boosted odds.
-              </Text>
+              <Text style={styles.heroCopy}>Stake ₦500 and win up to ₦120,000 with boosted odds.</Text>
               <Pressable style={styles.ctaBtn}>
                 <Text style={styles.ctaText}>Join Now</Text>
-                <MaterialIcons
-                  name="chevron-right"
-                  size={20}
-                  color={Brand.card}
-                />
+                <MaterialIcons name="chevron-right" size={20} color={Brand.card} />
               </Pressable>
             </View>
             <View style={styles.heroBadge}>
@@ -162,14 +218,18 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Quick Picks</Text>
-            <Text style={styles.sectionAction}>See all</Text>
+            <Text style={styles.sectionTitle}>More Markets</Text>
+            <Text style={styles.sectionAction}>Pick a market</Text>
           </View>
           <View style={styles.quickRow}>
-            {quickPicks.map((pick) => (
-              <View key={pick} style={styles.quickChip}>
-                <Text style={styles.quickText}>{pick}</Text>
-              </View>
+            {marketOptions.map((pick) => (
+              <Pressable
+                key={pick.key}
+                style={[styles.quickChip, marketKey === pick.key && styles.quickChipActive]}
+                onPress={() => setMarketKey(pick.key)}
+              >
+                <Text style={[styles.quickText, marketKey === pick.key && styles.quickTextActive]}>{pick.label}</Text>
+              </Pressable>
             ))}
           </View>
 
@@ -177,25 +237,25 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Featured Matches</Text>
             <Text style={styles.sectionAction}>Top odds</Text>
           </View>
-          {featuredMatches.map((match) => (
-            <View key={match.home} style={dynamicStyles.matchCard}>
+
+          {loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator color={Brand.navy} />
+              <Text style={styles.loadingText}>Loading matches...</Text>
+            </View>
+          ) : null}
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+          {featured.map((match) => (
+            <View key={match.id} style={dynamicStyles.matchCard}>
               <View style={styles.matchHeader}>
-                <Text style={styles.matchLeague}>{match.league}</Text>
-                <Text style={styles.matchTime}>{match.time}</Text>
+                <Text style={styles.matchLeague}>{match.sportTitle}</Text>
+                <Text style={styles.matchTime}>{formatMatchTime(match.commenceTime)}</Text>
               </View>
               <Text style={dynamicStyles.matchTeams}>
-                {match.home} vs {match.away}
+                {match.homeTeam} vs {match.awayTeam}
               </Text>
-              <View style={styles.oddsRow}>
-                {match.odds.map((odd, index) => (
-                  <View key={`${match.home}-${odd}`} style={styles.oddPill}>
-                    <Text style={styles.oddLabel}>
-                      {index === 0 ? "1" : index === 1 ? "X" : "2"}
-                    </Text>
-                    <Text style={styles.oddValue}>{odd}</Text>
-                  </View>
-                ))}
-              </View>
+              {renderOdds(match)}
             </View>
           ))}
 
@@ -203,31 +263,26 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Live Now</Text>
             <Text style={styles.sectionAction}>View live</Text>
           </View>
-          {liveMatches.map((match) => (
-            <View key={match.home} style={styles.liveCard}>
-              <View style={styles.liveHeader}>
-                <View style={styles.liveTag}>
-                  <MaterialIcons name="circle" size={10} color={Brand.green} />
-                  <Text style={styles.liveText}>LIVE</Text>
-                </View>
-                <Text style={styles.matchLeague}>{match.league}</Text>
-                <Text style={styles.matchTime}>{match.minute}</Text>
-              </View>
-              <Text style={dynamicStyles.matchTeams}>
-                {match.home} {match.score} {match.away}
-              </Text>
-              <View style={styles.oddsRow}>
-                {match.odds.map((odd, index) => (
-                  <View key={`${match.home}-${odd}`} style={styles.oddPill}>
-                    <Text style={styles.oddLabel}>
-                      {index === 0 ? "1" : index === 1 ? "X" : "2"}
-                    </Text>
-                    <Text style={styles.oddValue}>{odd}</Text>
+          {liveMatches.length === 0 ? (
+            <Text style={styles.emptyOdds}>No live games at the moment.</Text>
+          ) : (
+            liveMatches.map((match) => (
+              <View key={`live-${match.id}`} style={styles.liveCard}>
+                <View style={styles.liveHeader}>
+                  <View style={styles.liveTag}>
+                    <MaterialIcons name="circle" size={10} color={Brand.green} />
+                    <Text style={styles.liveText}>LIVE</Text>
                   </View>
-                ))}
+                  <Text style={styles.matchLeague}>{match.sportTitle}</Text>
+                  <Text style={styles.matchTime}>{formatMatchTime(match.commenceTime)}</Text>
+                </View>
+                <Text style={dynamicStyles.matchTeams}>
+                  {match.homeTeam} vs {match.awayTeam}
+                </Text>
+                {renderOdds(match)}
               </View>
-            </View>
-          ))}
+            ))
+          )}
         </ScrollView>
       </View>
     </View>
@@ -235,10 +290,6 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Brand.background,
-  },
   topBar: {
     paddingTop: 16,
     paddingHorizontal: 20,
@@ -384,10 +435,17 @@ const styles = StyleSheet.create({
     borderColor: Brand.border,
     borderWidth: 1,
   },
+  quickChipActive: {
+    backgroundColor: Brand.navy,
+    borderColor: Brand.navy,
+  },
   quickText: {
     color: Brand.navy,
     fontWeight: "600",
     fontSize: 12,
+  },
+  quickTextActive: {
+    color: Brand.card,
   },
   matchCard: {
     backgroundColor: Brand.card,
@@ -418,6 +476,7 @@ const styles = StyleSheet.create({
   },
   oddsRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     marginTop: 12,
   },
@@ -432,15 +491,25 @@ const styles = StyleSheet.create({
     gap: 6,
     alignItems: "center",
   },
+  oddPillActive: {
+    backgroundColor: Brand.navy,
+    borderColor: Brand.navy,
+  },
   oddLabel: {
     fontSize: 11,
     fontWeight: "700",
     color: Brand.muted,
   },
+  oddLabelActive: {
+    color: Brand.card,
+  },
   oddValue: {
     fontSize: 13,
     fontWeight: "700",
     color: Brand.navy,
+  },
+  oddValueActive: {
+    color: Brand.card,
   },
   liveCard: {
     backgroundColor: Brand.card,
@@ -468,5 +537,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: Brand.green,
+  },
+  loadingBox: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  loadingText: {
+    color: Brand.muted,
+    fontWeight: "600",
+  },
+  errorText: {
+    color: "#d15353",
+    fontWeight: "600",
+    marginBottom: 16,
+  },
+  emptyOdds: {
+    color: Brand.muted,
+    fontStyle: "italic",
+    marginTop: 12,
   },
 });

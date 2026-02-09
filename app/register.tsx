@@ -1,20 +1,64 @@
-import { StyleSheet, Text, TextInput, View, Pressable } from 'react-native';
-import { Link } from 'expo-router';
+import { useState } from 'react';
+import { StyleSheet, Text, TextInput, View, Pressable, ActivityIndicator } from 'react-native';
+import { Link, useRouter } from 'expo-router';
 
 import { Brand } from '@/constants/brand';
+import { useAuth } from '@/context/AuthContext';
 
 export default function RegisterScreen() {
+  const router = useRouter();
+  const { signUpWithPassword } = useAuth();
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleRegister = async () => {
+    setError(null);
+    setLoading(true);
+    const errorMessage = await signUpWithPassword(email.trim(), password, fullName.trim());
+    setLoading(false);
+    if (errorMessage) {
+      setError(errorMessage);
+      return;
+    }
+    router.replace('/(tabs)');
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Create account</Text>
       <Text style={styles.subtitle}>Join AD5BET to access live odds and jackpots.</Text>
 
       <View style={styles.form}>
-        <TextInput placeholder="Full name" placeholderTextColor={Brand.muted} style={styles.input} />
-        <TextInput placeholder="Phone number" placeholderTextColor={Brand.muted} style={styles.input} />
-        <TextInput placeholder="Password" placeholderTextColor={Brand.muted} secureTextEntry style={styles.input} />
-        <Pressable style={styles.primaryBtn}>
-          <Text style={styles.primaryText}>Register</Text>
+        <TextInput
+          placeholder="Full name"
+          placeholderTextColor={Brand.muted}
+          style={styles.input}
+          value={fullName}
+          onChangeText={setFullName}
+        />
+        <TextInput
+          placeholder="Email address"
+          placeholderTextColor={Brand.muted}
+          style={styles.input}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          value={email}
+          onChangeText={setEmail}
+        />
+        <TextInput
+          placeholder="Password"
+          placeholderTextColor={Brand.muted}
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <Pressable style={styles.primaryBtn} onPress={handleRegister} disabled={loading}>
+          {loading ? <ActivityIndicator color={Brand.card} /> : <Text style={styles.primaryText}>Register</Text>}
         </Pressable>
       </View>
 
@@ -64,6 +108,10 @@ const styles = StyleSheet.create({
   primaryText: {
     color: Brand.card,
     fontWeight: '700',
+  },
+  errorText: {
+    color: '#d15353',
+    fontWeight: '600',
   },
   footer: {
     marginTop: 18,
