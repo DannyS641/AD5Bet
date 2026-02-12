@@ -95,7 +95,7 @@ export async function fetchFeaturedOdds(sportKey = "soccer_epl") {
 export async function fetchEventMarkets(eventId: string, sportKey: string) {
   const data = await oddsApiFetch<OddsApiEvent[]>(`/sports/${sportKey}/events/${eventId}/odds`, {
     regions: DEFAULT_REGIONS,
-    markets: "h2h,totals,spreads,btts,draw_no_bet,h2h_3_way",
+    markets: "h2h,totals,alternate_totals,spreads,btts,draw_no_bet,h2h_3_way",
     oddsFormat: DEFAULT_ODDS_FORMAT,
     dateFormat: DEFAULT_DATE_FORMAT,
   });

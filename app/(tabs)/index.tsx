@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import { Link } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
+import { promotions } from "@/constants/promotions";
 import { useBetSlip } from "@/context/BetSlipContext";
 import { useAuth } from "@/context/AuthContext";
 import { OddsEvent, OddsMarket, fetchEventMarkets, fetchFeaturedOdds } from "@/lib/odds-api";
@@ -33,8 +35,7 @@ const marketOptions = [
 
 function formatMatchTime(iso: string) {
   const date = new Date(iso);
-  return date.toLocaleString(undefined, {
-    weekday: "short",
+  return date.toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -63,6 +64,9 @@ export default function HomeScreen() {
   const [marketKey, setMarketKey] = useState("h2h");
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [promoIndex, setPromoIndex] = useState(0);
+  const promoFade = useRef(new Animated.Value(1)).current;
+  const [goalLines, setGoalLines] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let mounted = true;
@@ -123,10 +127,44 @@ export default function HomeScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const cycle = () => {
+      timer = setTimeout(() => {
+        Animated.timing(promoFade, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        }).start(() => {
+          if (!mounted) return;
+          setPromoIndex((current) => (current + 1) % promotions.length);
+          Animated.timing(promoFade, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }).start(() => {
+            if (mounted) cycle();
+          });
+        });
+      }, 10000);
+    };
+
+    cycle();
+
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+    };
+  }, [promoFade]);
+
   const liveMatches = useMemo(
     () => featured.filter((match) => new Date(match.commenceTime).getTime() <= Date.now()),
     [featured]
   );
+
+  const promo = promotions[promoIndex];
 
   const dynamicStyles = {
     wrapper: {
@@ -171,41 +209,165 @@ export default function HomeScreen() {
     },
   };
 
-  const renderOdds = (match: OddsEvent) => {
-    const market = match.markets.find((item) => item.key === marketKey);
-    if (!market) {
-      return <Text style={styles.emptyOdds}>Market not available</Text>;
-    }
+  const formatOdd = (value?: number) => (typeof value === "number" ? value.toFixed(2) : "--");
+
+  const getLineOptions = (market?: OddsMarket) => {
+    if (!market) return [];
+    const points = market.outcomes
+      .map((outcome) => outcome.point)
+      .filter((point): point is number => typeof point === "number")
+      .filter((point) => point >= 0.5 && point <= 5.5);
+    return Array.from(new Set(points)).sort((a, b) => a - b);
+  };
+
+  const renderOddCell = (
+    match: OddsEvent,
+    marketKey: string,
+    outcome: OddsMarket["outcomes"][number] | undefined,
+    outcomeLabel?: string
+  ) => {
+    const label = outcomeLabel ?? outcome?.name ?? "N/A";
+    const selectionId = `${match.id}-${marketKey}-${label}`;
+    const isSelected = selections.some((item) => item.id === selectionId);
 
     return (
-      <View style={styles.oddsRow}>
-        {market.outcomes.map((odd) => {
-          const selectionId = `${match.id}-${market.key}-${odd.name}`;
-          const isSelected = selections.some((item) => item.id === selectionId);
+      <Pressable
+        key={selectionId}
+        style={[
+          styles.oddCell,
+          isSelected && styles.oddCellActive,
+          !outcome && styles.oddCellDisabled,
+        ]}
+        onPress={() =>
+          outcome &&
+          addSelection({
+            id: selectionId,
+            eventId: match.id,
+            sportKey: match.sportKey,
+            league: match.sportTitle,
+            match: `${match.homeTeam} vs ${match.awayTeam}`,
+            market: marketKey,
+            outcome: label,
+            odds: outcome.price,
+            commenceTime: match.commenceTime,
+          })
+        }
+        disabled={!outcome}
+      >
+        <Text
+          style={[
+            styles.oddText,
+            isSelected && styles.oddTextActive,
+            !outcome && styles.oddTextDisabled,
+          ]}
+        >
+          {formatOdd(outcome?.price)}
+        </Text>
+      </Pressable>
+    );
+  };
 
-          return (
-            <Pressable
-              key={selectionId}
-              style={[styles.oddPill, isSelected && styles.oddPillActive]}
-              onPress={() =>
-                addSelection({
-                  id: selectionId,
-                  eventId: match.id,
-                  sportKey: match.sportKey,
-                  league: match.sportTitle,
-                  match: `${match.homeTeam} vs ${match.awayTeam}`,
-                  market: market.key,
-                  outcome: odd.name,
-                  odds: odd.price,
-                  commenceTime: match.commenceTime,
-                })
-              }
-            >
-              <Text style={[styles.oddLabel, isSelected && styles.oddLabelActive]}>{odd.name}</Text>
-              <Text style={[styles.oddValue, isSelected && styles.oddValueActive]}>{odd.price}</Text>
-            </Pressable>
+  const renderMatchRow = (match: OddsEvent, options?: { live?: boolean; keyPrefix?: string }) => {
+    const h2hMarket = match.markets.find((item) => item.key === "h2h");
+    const totalsMarket =
+      match.markets.find((item) => item.key === "alternate_totals") ??
+      match.markets.find((item) => item.key === "totals");
+    const lineOptions = getLineOptions(totalsMarket);
+    const defaultLine = lineOptions.includes(2.5) ? 2.5 : lineOptions[0];
+    const storedLine = goalLines[match.id];
+    const activeLine =
+      lineOptions.length === 0
+        ? null
+        : storedLine && lineOptions.includes(storedLine)
+          ? storedLine
+          : defaultLine;
+    const lineLabel = activeLine != null ? activeLine.toFixed(1) : "--";
+    const totalsKey = totalsMarket?.key ?? "totals";
+    const canCycleLine = lineOptions.length > 1;
+
+    const homeOutcome = h2hMarket?.outcomes.find((outcome) => outcome.name === match.homeTeam);
+    const drawOutcome = h2hMarket?.outcomes.find(
+      (outcome) => outcome.name.toLowerCase() === "draw"
+    );
+    const awayOutcome = h2hMarket?.outcomes.find((outcome) => outcome.name === match.awayTeam);
+
+    const overOutcome =
+      activeLine == null
+        ? undefined
+        : totalsMarket?.outcomes.find(
+            (outcome) => outcome.name === "Over" && outcome.point === activeLine
           );
-        })}
+    const underOutcome =
+      activeLine == null
+        ? undefined
+        : totalsMarket?.outcomes.find(
+            (outcome) => outcome.name === "Under" && outcome.point === activeLine
+          );
+
+    const overLabel = activeLine != null ? `Over ${lineLabel}` : "Over";
+    const underLabel = activeLine != null ? `Under ${lineLabel}` : "Under";
+    const extraCount = match.markets.filter(
+      (market) => market.key !== "h2h" && market.key !== totalsKey
+    ).length;
+    const key = options?.keyPrefix ? `${options.keyPrefix}-${match.id}` : match.id;
+
+    return (
+      <View key={key} style={styles.matchRow}>
+        <View style={styles.matchInfo}>
+          <View style={styles.timeCol}>
+            {options?.live ? (
+              <View style={styles.liveTag}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>LIVE</Text>
+              </View>
+            ) : null}
+            <Text style={styles.timeText}>{formatMatchTime(match.commenceTime)}</Text>
+          </View>
+          <View style={styles.teamsCol}>
+            <Text style={styles.teamText} numberOfLines={1}>
+              {match.homeTeam}
+            </Text>
+            <Text style={styles.teamText} numberOfLines={1}>
+              {match.awayTeam}
+            </Text>
+          </View>
+          <View style={styles.statsCol}>
+            <MaterialIcons name="show-chart" size={18} color={Brand.muted} />
+          </View>
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.oddsGroup}
+        >
+          {renderOddCell(match, "h2h", homeOutcome)}
+          {renderOddCell(match, "h2h", drawOutcome)}
+          {renderOddCell(match, "h2h", awayOutcome)}
+          <Pressable
+            style={[styles.goalsCell, !activeLine && styles.goalsCellDisabled]}
+            onPress={() => {
+              if (!canCycleLine || activeLine == null) return;
+              const currentIndex = lineOptions.indexOf(activeLine);
+              const nextLine = lineOptions[(currentIndex + 1) % lineOptions.length];
+              setGoalLines((current) => ({ ...current, [match.id]: nextLine }));
+            }}
+            disabled={!canCycleLine}
+          >
+            <Text style={[styles.goalsText, !activeLine && styles.goalsTextDisabled]}>
+              {lineLabel}
+            </Text>
+            {canCycleLine ? (
+              <MaterialIcons name="keyboard-arrow-down" size={18} color={Brand.muted} />
+            ) : null}
+          </Pressable>
+          {renderOddCell(match, totalsKey, overOutcome, overLabel)}
+          {renderOddCell(match, totalsKey, underOutcome, underLabel)}
+          <View style={styles.moreCell}>
+            <Text style={styles.moreText}>+{extraCount}</Text>
+            <MaterialIcons name="chevron-right" size={16} color={Brand.muted} />
+          </View>
+        </ScrollView>
       </View>
     );
   };
@@ -252,21 +414,21 @@ export default function HomeScreen() {
         </View>
 
         <ScrollView contentContainerStyle={dynamicStyles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={dynamicStyles.hero}>
+          <Animated.View style={[dynamicStyles.hero, { opacity: promoFade }]}>
             <View style={styles.heroLeft}>
-              <Text style={styles.heroLabel}>Today's Boost</Text>
-              <Text style={dynamicStyles.heroTitle}>Super Sunday Combo</Text>
-              <Text style={styles.heroCopy}>Stake ₦500 and win up to ₦120,000 with boosted odds.</Text>
+              <Text style={styles.heroLabel}>{promo.label}</Text>
+              <Text style={dynamicStyles.heroTitle}>{promo.title}</Text>
+              <Text style={styles.heroCopy}>{promo.copy}</Text>
               <Pressable style={styles.ctaBtn}>
-                <Text style={styles.ctaText}>Join Now</Text>
+                <Text style={styles.ctaText}>{promo.cta}</Text>
                 <MaterialIcons name="chevron-right" size={20} color={Brand.card} />
               </Pressable>
             </View>
             <View style={styles.heroBadge}>
-              <Text style={styles.heroBadgeTop}>+12%</Text>
-              <Text style={styles.heroBadgeBottom}>Boost</Text>
+              <Text style={styles.heroBadgeTop}>{promo.badgeTop}</Text>
+              <Text style={styles.heroBadgeBottom}>{promo.badgeBottom}</Text>
             </View>
-          </View>
+          </Animated.View>
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>More Markets</Text>
@@ -299,18 +461,26 @@ export default function HomeScreen() {
           ) : null}
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-          {featured.map((match) => (
-            <View key={match.id} style={dynamicStyles.matchCard}>
-              <View style={styles.matchHeader}>
-                <Text style={styles.matchLeague}>{match.sportTitle}</Text>
-                <Text style={styles.matchTime}>{formatMatchTime(match.commenceTime)}</Text>
-              </View>
-              <Text style={dynamicStyles.matchTeams}>
-                {match.homeTeam} vs {match.awayTeam}
-              </Text>
-              {renderOdds(match)}
+          <View style={styles.marketHeader}>
+            <View style={styles.marketHeaderLeft}>
+              <Text style={styles.marketHeaderLabel}>Match</Text>
             </View>
-          ))}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.oddsGroup}
+            >
+              <Text style={styles.headerCell}>1</Text>
+              <Text style={styles.headerCell}>X</Text>
+              <Text style={styles.headerCell}>2</Text>
+              <Text style={styles.headerCell}>Goals</Text>
+              <Text style={styles.headerCell}>Over</Text>
+              <Text style={styles.headerCell}>Under</Text>
+              <Text style={styles.headerCell}>+M</Text>
+            </ScrollView>
+          </View>
+
+          {featured.map((match) => renderMatchRow(match))}
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Live Now</Text>
@@ -319,22 +489,27 @@ export default function HomeScreen() {
           {liveMatches.length === 0 ? (
             <Text style={styles.emptyOdds}>No live games at the moment.</Text>
           ) : (
-            liveMatches.map((match) => (
-              <View key={`live-${match.id}`} style={styles.liveCard}>
-                <View style={styles.liveHeader}>
-                  <View style={styles.liveTag}>
-                    <MaterialIcons name="circle" size={10} color={Brand.green} />
-                    <Text style={styles.liveText}>LIVE</Text>
-                  </View>
-                  <Text style={styles.matchLeague}>{match.sportTitle}</Text>
-                  <Text style={styles.matchTime}>{formatMatchTime(match.commenceTime)}</Text>
+            <>
+              <View style={styles.marketHeader}>
+                <View style={styles.marketHeaderLeft}>
+                  <Text style={styles.marketHeaderLabel}>Live Match</Text>
                 </View>
-                <Text style={dynamicStyles.matchTeams}>
-                  {match.homeTeam} vs {match.awayTeam}
-                </Text>
-                {renderOdds(match)}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.oddsGroup}
+                >
+                  <Text style={styles.headerCell}>1</Text>
+                  <Text style={styles.headerCell}>X</Text>
+                  <Text style={styles.headerCell}>2</Text>
+                  <Text style={styles.headerCell}>Goals</Text>
+                  <Text style={styles.headerCell}>Over</Text>
+                  <Text style={styles.headerCell}>Under</Text>
+                  <Text style={styles.headerCell}>+M</Text>
+                </ScrollView>
               </View>
-            ))
+              {liveMatches.map((match) => renderMatchRow(match, { live: true, keyPrefix: "live" }))}
+            </>
           )}
         </ScrollView>
       </View>
@@ -485,6 +660,143 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Brand.navyDeep,
     fontWeight: "600",
+  },
+  marketHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Brand.border,
+    marginBottom: 6,
+  },
+  marketHeaderLeft: {
+    flex: 1,
+    minWidth: 180,
+  },
+  marketHeaderLabel: {
+    color: Brand.muted,
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  headerCell: {
+    width: 58,
+    textAlign: "center",
+    color: Brand.muted,
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  matchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Brand.border,
+  },
+  matchInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    minWidth: 180,
+    paddingRight: 8,
+  },
+  timeCol: {
+    width: 62,
+  },
+  timeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: Brand.text,
+  },
+  teamsCol: {
+    flex: 1,
+  },
+  teamText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: Brand.text,
+  },
+  statsCol: {
+    width: 28,
+    alignItems: "center",
+  },
+  oddsGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 6,
+    paddingRight: 6,
+  },
+  oddCell: {
+    width: 58,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: Brand.navy,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  oddCellActive: {
+    backgroundColor: Brand.gold,
+  },
+  oddCellDisabled: {
+    backgroundColor: Brand.border,
+  },
+  oddText: {
+    color: Brand.card,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  oddTextActive: {
+    color: Brand.navyDeep,
+  },
+  oddTextDisabled: {
+    color: Brand.muted,
+  },
+  goalsCell: {
+    width: 58,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: Brand.card,
+    borderWidth: 1,
+    borderColor: Brand.border,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 2,
+  },
+  goalsCellDisabled: {
+    backgroundColor: Brand.background,
+  },
+  goalsText: {
+    color: Brand.navy,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  goalsTextDisabled: {
+    color: Brand.muted,
+  },
+  moreCell: {
+    width: 54,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Brand.border,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 2,
+    backgroundColor: Brand.card,
+  },
+  moreText: {
+    color: Brand.navy,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Brand.green,
   },
   sectionHeader: {
     flexDirection: "row",
@@ -640,3 +952,4 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
 });
+
