@@ -33,6 +33,15 @@ const extractReference = (url?: string | null) => {
   return reference ?? null;
 };
 
+const clearWebReference = () => {
+  if (Platform.OS !== "web" || typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("reference") && !url.searchParams.has("trxref")) return;
+  url.searchParams.delete("reference");
+  url.searchParams.delete("trxref");
+  window.history.replaceState({}, "", url.toString());
+};
+
 export default function WalletScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -80,10 +89,18 @@ export default function WalletScreen() {
       setError(null);
       setLoading(true);
 
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.access_token) {
+        setError("Please sign in again.");
+        setLoading(false);
+        return;
+      }
+
       const { data: verifyData, error: verifyError } = await supabase.functions.invoke(
         "verify-paystack-transaction",
         {
           body: { reference },
+          headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
         },
       );
 
@@ -122,6 +139,7 @@ export default function WalletScreen() {
 
       if (reference) {
         await AsyncStorage.removeItem(pendingReferenceKey);
+        clearWebReference();
         await verifyReference(reference);
       }
     };
@@ -132,6 +150,7 @@ export default function WalletScreen() {
       const reference = extractReference(url);
       if (!reference) return;
       AsyncStorage.removeItem(pendingReferenceKey).finally(() => {
+        clearWebReference();
         verifyReference(reference);
       });
     });
@@ -145,6 +164,13 @@ export default function WalletScreen() {
     if (!user) return;
     setError(null);
     setLoading(true);
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session?.access_token) {
+      setError("Please sign in again.");
+      setLoading(false);
+      return;
+    }
 
     const amountValue = Math.max(0, Number(amount || 0));
     if (!amountValue) {
@@ -160,6 +186,7 @@ export default function WalletScreen() {
         amount: Math.round(amountValue * 100),
         callbackUrl: redirectUrl,
       },
+      headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
     });
 
     if (functionError || !data?.authorizationUrl || !data?.reference) {
