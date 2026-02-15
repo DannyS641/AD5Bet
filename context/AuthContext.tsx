@@ -35,14 +35,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session ?? null);
-      setUser(data.session?.user ?? null);
-      setLoading(false);
-    });
+    const loadSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!mounted) return;
+        if (error) {
+          await supabase.auth.signOut({ scope: "local" });
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        setSession(data.session ?? null);
+        setUser(data.session?.user ?? null);
+        setLoading(false);
+      } catch {
+        if (!mounted) return;
+        await supabase.auth.signOut({ scope: "local" });
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+      }
+    };
+
+    loadSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
     });

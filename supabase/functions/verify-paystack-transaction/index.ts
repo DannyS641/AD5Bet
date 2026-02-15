@@ -1,5 +1,7 @@
 // Supabase Edge Function: verify-paystack-transaction
-// Requires PAYSTACK_SECRET_KEY to be set in Supabase secrets.
+// Requires PAYSTACK_SECRET_KEY, SUPABASE_URL, and SUPABASE_SERVICE_ROLE_KEY to be set in Supabase secrets.
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,12 +9,25 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { persistSession: false },
+});
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return new Response(JSON.stringify({ error: "Server misconfigured." }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { reference } = await req.json();
     if (!reference) {
       return new Response(JSON.stringify({ error: "Missing reference." }), {
@@ -38,13 +53,70 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const data = payload?.data ?? {};
+    if (data.status !== "success") {
+      return new Response(JSON.stringify({ error: "Payment not successful." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const metadata = data.metadata ?? {};
+    const userId = metadata.userId ?? metadata.user_id;
+    if (!userId) {
+      return new Response(JSON.stringify({ error: "Missing user metadata." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!data.reference) {
+      return new Response(JSON.stringify({ error: "Missing transaction reference." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const amountKobo = Number(data.amount ?? 0);
+    if (!amountKobo || Number.isNaN(amountKobo)) {
+      return new Response(JSON.stringify({ error: "Invalid amount." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const currency = data.currency ?? "NGN";
+    const amountValue = amountKobo / 100;
+
+    const { data: walletBalanceRaw, error: walletError } = await supabaseAdmin.rpc(
+      "credit_wallet_from_payment",
+      {
+        p_user_id: userId,
+        p_reference: data.reference,
+        p_amount: amountValue,
+        p_currency: currency,
+      },
+    );
+
+    if (walletError) {
+      return new Response(JSON.stringify({ error: walletError.message ?? "Wallet update failed." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const walletBalance = walletBalanceRaw === null || walletBalanceRaw === undefined
+      ? null
+      : Number(walletBalanceRaw);
+
     return new Response(
       JSON.stringify({
-        status: payload.data.status,
-        reference: payload.data.reference,
-        amount: payload.data.amount,
-        currency: payload.data.currency,
-        paidAt: payload.data.paid_at,
+        status: data.status,
+        reference: data.reference,
+        amount: data.amount,
+        currency: data.currency,
+        paidAt: data.paid_at,
+        walletBalance,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
