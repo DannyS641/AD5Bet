@@ -1,5 +1,14 @@
-import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, Pressable, TextInput, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  Pressable,
+  TextInput,
+  ActivityIndicator,
+  ScrollView,
+  RefreshControl,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Link, useRouter } from 'expo-router';
@@ -24,36 +33,36 @@ export default function AccountScreen() {
     secret: string;
   } | null>(null);
   const [enrollCode, setEnrollCode] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadProfile = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const [{ data: profile }, { data: wallet }] = await Promise.all([
+      supabase.from('profiles').select('full_name').eq('id', user.id).single(),
+      supabase.from('wallets').select('balance').eq('user_id', user.id).single(),
+    ]);
+    setProfileName(profile?.full_name ?? user.email ?? null);
+    setWalletBalance(wallet?.balance ?? 0);
+    setLoading(false);
+  }, [user]);
+
+  const loadMfa = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase.auth.mfa.listFactors();
+    setMfaEnabled(Boolean(data.totp?.length));
+  }, [user]);
 
   useEffect(() => {
-    let mounted = true;
-
-    const loadProfile = async () => {
-      if (!user) return;
-      setLoading(true);
-      const [{ data: profile }, { data: wallet }] = await Promise.all([
-        supabase.from('profiles').select('full_name').eq('id', user.id).single(),
-        supabase.from('wallets').select('balance').eq('user_id', user.id).single(),
-      ]);
-      if (!mounted) return;
-      setProfileName(profile?.full_name ?? user.email ?? null);
-      setWalletBalance(wallet?.balance ?? 0);
-      setLoading(false);
-    };
-
-    const loadMfa = async () => {
-      if (!user) return;
-      const { data } = await supabase.auth.mfa.listFactors();
-      setMfaEnabled(Boolean(data.totp?.length));
-    };
-
     loadProfile();
     loadMfa();
+  }, [loadMfa, loadProfile]);
 
-    return () => {
-      mounted = false;
-    };
-  }, [user]);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadProfile(), loadMfa()]);
+    setRefreshing(false);
+  }, [loadMfa, loadProfile]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -92,7 +101,11 @@ export default function AccountScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <Text style={styles.title}>Account</Text>
         <MaterialIcons name="person" size={22} color={Brand.navy} />
@@ -194,7 +207,7 @@ export default function AccountScreen() {
           </Link>
         ))}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 

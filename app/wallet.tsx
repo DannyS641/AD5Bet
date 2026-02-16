@@ -1,5 +1,15 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View, TextInput, Pressable, ActivityIndicator, Platform, ScrollView } from "react-native";
+import {
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  Pressable,
+  ActivityIndicator,
+  Platform,
+  ScrollView,
+  RefreshControl,
+} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
@@ -52,6 +62,7 @@ export default function WalletScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
   const [transactionsError, setTransactionsError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadWallet = useCallback(async () => {
     if (!user) return;
@@ -126,6 +137,12 @@ export default function WalletScreen() {
   useEffect(() => {
     loadWallet();
     loadTransactions();
+  }, [loadTransactions, loadWallet]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadWallet(), loadTransactions()]);
+    setRefreshing(false);
   }, [loadTransactions, loadWallet]);
 
   useEffect(() => {
@@ -253,6 +270,7 @@ export default function WalletScreen() {
     <ScrollView
       contentContainerStyle={[styles.container, { paddingTop: 24 + insets.top }]}
       showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.title}>Wallet</Text>
       <Text style={styles.subtitle}>Add funds to place bets instantly.</Text>

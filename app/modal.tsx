@@ -1,12 +1,23 @@
-import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
+import { useCallback, useState } from "react";
+import { RefreshControl, ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
 import { Brand } from "@/constants/brand";
 import { promotions } from "@/constants/promotions";
 
 export default function PromotionsScreen() {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 400);
+  }, []);
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
       <View style={styles.header}>
         <Text style={styles.title}>Promotions</Text>
         <Text style={styles.subtitle}>Fresh boosts and bonuses to power your bets.</Text>

@@ -1,5 +1,14 @@
-import { useState } from "react";
-import { ScrollView, StyleSheet, Text, View, Pressable, TextInput, ActivityIndicator } from "react-native";
+import { useCallback, useState } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  Pressable,
+  TextInput,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useRouter } from "expo-router";
@@ -16,6 +25,13 @@ export default function BetSlipScreen() {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setError(null);
+    setRefreshing(false);
+  }, []);
 
   const handlePlaceBet = async () => {
     if (!user) {
@@ -74,7 +90,10 @@ export default function BetSlipScreen() {
           <Text style={styles.badgeText}>{selections.length}</Text>
         </View>
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         {selections.length === 0 ? (
           <Text style={styles.emptyText}>Your bet slip is empty. Tap odds to add selections.</Text>
         ) : null}

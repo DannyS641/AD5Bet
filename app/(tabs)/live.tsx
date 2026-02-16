@@ -1,5 +1,13 @@
-import { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, View, Pressable, ActivityIndicator } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  Pressable,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -14,31 +22,31 @@ export default function LiveScreen() {
   const [liveMatches, setLiveMatches] = useState<OddsEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadLive = useCallback(async () => {
+    try {
+      setLoading(true);
+      const events = await fetchFeaturedOdds("soccer_epl");
+      const live = events.filter((event) => new Date(event.commenceTime).getTime() <= Date.now());
+      setLiveMatches(live);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load live matches.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let mounted = true;
-
-    const loadLive = async () => {
-      try {
-        setLoading(true);
-        const events = await fetchFeaturedOdds("soccer_epl");
-        const live = events.filter((event) => new Date(event.commenceTime).getTime() <= Date.now());
-        if (!mounted) return;
-        setLiveMatches(live);
-        setError(null);
-      } catch (err) {
-        if (!mounted) return;
-        setError(err instanceof Error ? err.message : "Unable to load live matches.");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
     loadLive();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  }, [loadLive]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadLive();
+    setRefreshing(false);
+  }, [loadLive]);
 
   return (
     <View style={styles.container}>
@@ -49,7 +57,10 @@ export default function LiveScreen() {
           <Text style={styles.pillText}>Live</Text>
         </View>
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         {loading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={Brand.navy} />

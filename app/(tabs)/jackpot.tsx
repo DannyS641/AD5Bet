@@ -1,4 +1,5 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
@@ -12,13 +13,22 @@ const jackpots = [
 
 export default function JackpotScreen() {
   const insets = useSafeAreaInsets();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 400);
+  }, []);
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: 16 + insets.top }]}>
         <Text style={styles.title}>Jackpot</Text>
         <MaterialIcons name="emoji-events" size={22} color={Brand.navy} />
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <View style={styles.banner}>
           <Text style={styles.bannerLabel}>Top Prize</Text>
           <Text style={styles.bannerPrize}>₦200,000,000</Text>

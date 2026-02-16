@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   ScrollView,
@@ -9,6 +9,7 @@ import {
   Platform,
   useWindowDimensions,
   ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Link } from "expo-router";
@@ -67,65 +68,58 @@ export default function HomeScreen() {
   const [promoIndex, setPromoIndex] = useState(0);
   const promoFade = useRef(new Animated.Value(1)).current;
   const [goalLines, setGoalLines] = useState<Record<string, number>>({});
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    let mounted = true;
-
-    const loadProfile = async () => {
-      if (!user) {
-        setWalletBalance(null);
-        setProfileLoading(false);
-        return;
-      }
-      setProfileLoading(true);
-      const [{ data: wallet }] = await Promise.all([
-        supabase.from("wallets").select("balance").eq("user_id", user.id).single(),
-      ]);
-      if (!mounted) return;
-      setWalletBalance(wallet?.balance ?? 0);
+  const loadProfile = useCallback(async () => {
+    if (!user) {
+      setWalletBalance(null);
       setProfileLoading(false);
-    };
-
-    loadProfile();
-    return () => {
-      mounted = false;
-    };
+      return;
+    }
+    setProfileLoading(true);
+    try {
+      const { data: wallet } = await supabase
+        .from("wallets")
+        .select("balance")
+        .eq("user_id", user.id)
+        .single();
+      setWalletBalance(wallet?.balance ?? 0);
+    } finally {
+      setProfileLoading(false);
+    }
   }, [user]);
 
-  useEffect(() => {
-    let mounted = true;
-
-    const loadOdds = async () => {
-      try {
-        setLoading(true);
-        const baseEvents = await fetchFeaturedOdds("soccer_epl");
-        const enriched = await Promise.all(
-          baseEvents.slice(0, 8).map(async (event) => {
-            try {
-              const extra = await fetchEventMarkets(event.id, event.sportKey);
-              if (!extra) return event;
-              return { ...event, markets: mergeMarkets(event.markets, extra.markets) };
-            } catch {
-              return event;
-            }
-          })
-        );
-        if (!mounted) return;
-        setFeatured(enriched);
-        setError(null);
-      } catch (err) {
-        if (!mounted) return;
-        setError(err instanceof Error ? err.message : "Unable to load matches.");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    loadOdds();
-    return () => {
-      mounted = false;
-    };
+  const loadOdds = useCallback(async () => {
+    try {
+      setLoading(true);
+      const baseEvents = await fetchFeaturedOdds("soccer_epl");
+      const enriched = await Promise.all(
+        baseEvents.slice(0, 8).map(async (event) => {
+          try {
+            const extra = await fetchEventMarkets(event.id, event.sportKey);
+            if (!extra) return event;
+            return { ...event, markets: mergeMarkets(event.markets, extra.markets) };
+          } catch {
+            return event;
+          }
+        })
+      );
+      setFeatured(enriched);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load matches.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
+  useEffect(() => {
+    loadOdds();
+  }, [loadOdds]);
 
   useEffect(() => {
     let mounted = true;
@@ -158,6 +152,12 @@ export default function HomeScreen() {
       clearTimeout(timer);
     };
   }, [promoFade]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadProfile(), loadOdds()]);
+    setRefreshing(false);
+  }, [loadOdds, loadProfile]);
 
   const liveMatches = useMemo(
     () => featured.filter((match) => new Date(match.commenceTime).getTime() <= Date.now()),
@@ -413,7 +413,11 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={dynamicStyles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={dynamicStyles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
           <Animated.View style={[dynamicStyles.hero, { opacity: promoFade }]}>
             <View style={styles.heroLeft}>
               <Text style={styles.heroLabel}>{promo.label}</Text>
