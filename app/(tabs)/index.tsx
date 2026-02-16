@@ -416,8 +416,8 @@ export default function HomeScreen() {
           ) : null}
           {marketKey === "btts" ? (
             <>
-              {renderOddCell(match, "btts", bttsYes)}
-              {renderOddCell(match, "btts", bttsNo)}
+              {renderOddCell(match, "btts", bttsYes, "Yes")}
+              {renderOddCell(match, "btts", bttsNo, "No")}
             </>
           ) : null}
           {marketKey === "draw_no_bet" ? (
@@ -428,15 +428,15 @@ export default function HomeScreen() {
           ) : null}
           {marketKey === "h2h_3_way" ? (
             <>
-              {renderOddCell(match, "h2h_3_way", threeWayHome)}
-              {renderOddCell(match, "h2h_3_way", threeWayDraw)}
-              {renderOddCell(match, "h2h_3_way", threeWayAway)}
+              {renderOddCell(match, "h2h_3_way", threeWayHome, "1")}
+              {renderOddCell(match, "h2h_3_way", threeWayDraw, "X")}
+              {renderOddCell(match, "h2h_3_way", threeWayAway, "2")}
             </>
           ) : null}
           {marketKey === "spreads" ? (
             <>
-              {renderOddCell(match, "spreads", spreadHome)}
-              {renderOddCell(match, "spreads", spreadAway)}
+              {renderOddCell(match, "spreads", spreadHome, "Home")}
+              {renderOddCell(match, "spreads", spreadAway, "Away")}
             </>
           ) : null}
           <Pressable
