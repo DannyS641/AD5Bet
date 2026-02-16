@@ -12,7 +12,7 @@ import {
   RefreshControl,
 } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
@@ -58,6 +58,7 @@ export default function HomeScreen() {
   const { addSelection, selections } = useBetSlip();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   const [featured, setFeatured] = useState<OddsEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -210,6 +211,7 @@ export default function HomeScreen() {
   };
 
   const formatOdd = (value?: number) => (typeof value === "number" ? value.toFixed(2) : "--");
+  const leftColWidth = isWeb && isLargeScreen ? 220 : 160;
 
   const getLineOptions = (market?: OddsMarket) => {
     if (!market) return [];
@@ -272,6 +274,10 @@ export default function HomeScreen() {
     const totalsMarket =
       match.markets.find((item) => item.key === "alternate_totals") ??
       match.markets.find((item) => item.key === "totals");
+    const bttsMarket = match.markets.find((item) => item.key === "btts");
+    const dnbMarket = match.markets.find((item) => item.key === "draw_no_bet");
+    const threeWayMarket = match.markets.find((item) => item.key === "h2h_3_way");
+    const spreadsMarket = match.markets.find((item) => item.key === "spreads");
     const lineOptions = getLineOptions(totalsMarket);
     const defaultLine = lineOptions.includes(2.5) ? 2.5 : lineOptions[0];
     const storedLine = goalLines[match.id];
@@ -291,17 +297,34 @@ export default function HomeScreen() {
     );
     const awayOutcome = h2hMarket?.outcomes.find((outcome) => outcome.name === match.awayTeam);
 
+    const threeWayHome = threeWayMarket?.outcomes.find((outcome) => outcome.name === match.homeTeam);
+    const threeWayDraw = threeWayMarket?.outcomes.find(
+      (outcome) => outcome.name.toLowerCase() === "draw"
+    );
+    const threeWayAway = threeWayMarket?.outcomes.find((outcome) => outcome.name === match.awayTeam);
+
+    const bttsYes = bttsMarket?.outcomes.find((outcome) => outcome.name.toLowerCase() === "yes");
+    const bttsNo = bttsMarket?.outcomes.find((outcome) => outcome.name.toLowerCase() === "no");
+
+    const dnbHome = dnbMarket?.outcomes.find((outcome) => outcome.name === match.homeTeam);
+    const dnbAway = dnbMarket?.outcomes.find((outcome) => outcome.name === match.awayTeam);
+
+    const spreadHome = spreadsMarket?.outcomes.find((outcome) => outcome.name === match.homeTeam);
+    const spreadAway = spreadsMarket?.outcomes.find((outcome) => outcome.name === match.awayTeam);
+
     const overOutcome =
       activeLine == null
         ? undefined
         : totalsMarket?.outcomes.find(
-            (outcome) => outcome.name === "Over" && outcome.point === activeLine
+            (outcome) =>
+              outcome.name.toLowerCase().startsWith("over") && outcome.point === activeLine
           );
     const underOutcome =
       activeLine == null
         ? undefined
         : totalsMarket?.outcomes.find(
-            (outcome) => outcome.name === "Under" && outcome.point === activeLine
+            (outcome) =>
+              outcome.name.toLowerCase().startsWith("under") && outcome.point === activeLine
           );
 
     const overLabel = activeLine != null ? `Over ${lineLabel}` : "Over";
@@ -313,7 +336,7 @@ export default function HomeScreen() {
 
     return (
       <View key={key} style={styles.matchRow}>
-        <View style={styles.matchInfo}>
+        <View style={[styles.matchInfo, { width: leftColWidth }]}>
           <View style={styles.timeCol}>
             {options?.live ? (
               <View style={styles.liveTag}>
@@ -337,36 +360,103 @@ export default function HomeScreen() {
         </View>
 
         <ScrollView
+          style={styles.oddsScroll}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.oddsGroup}
         >
-          {renderOddCell(match, "h2h", homeOutcome)}
-          {renderOddCell(match, "h2h", drawOutcome)}
-          {renderOddCell(match, "h2h", awayOutcome)}
+          {marketKey === "h2h" ? (
+            <>
+              {renderOddCell(match, "h2h", homeOutcome)}
+              {renderOddCell(match, "h2h", drawOutcome)}
+              {renderOddCell(match, "h2h", awayOutcome)}
+              <Pressable
+                style={[styles.goalsCell, !activeLine && styles.goalsCellDisabled]}
+                onPress={() => {
+                  if (!canCycleLine || activeLine == null) return;
+                  const currentIndex = lineOptions.indexOf(activeLine);
+                  const nextLine = lineOptions[(currentIndex + 1) % lineOptions.length];
+                  setGoalLines((current) => ({ ...current, [match.id]: nextLine }));
+                }}
+                disabled={!canCycleLine}
+              >
+                <Text style={[styles.goalsText, !activeLine && styles.goalsTextDisabled]}>
+                  {lineLabel}
+                </Text>
+                {canCycleLine ? (
+                  <MaterialIcons name="keyboard-arrow-down" size={18} color={Brand.muted} />
+                ) : null}
+              </Pressable>
+              {renderOddCell(match, totalsKey, overOutcome, overLabel)}
+              {renderOddCell(match, totalsKey, underOutcome, underLabel)}
+            </>
+          ) : null}
+          {marketKey === "totals" ? (
+            <>
+              <Pressable
+                style={[styles.goalsCell, !activeLine && styles.goalsCellDisabled]}
+                onPress={() => {
+                  if (!canCycleLine || activeLine == null) return;
+                  const currentIndex = lineOptions.indexOf(activeLine);
+                  const nextLine = lineOptions[(currentIndex + 1) % lineOptions.length];
+                  setGoalLines((current) => ({ ...current, [match.id]: nextLine }));
+                }}
+                disabled={!canCycleLine}
+              >
+                <Text style={[styles.goalsText, !activeLine && styles.goalsTextDisabled]}>
+                  {lineLabel}
+                </Text>
+                {canCycleLine ? (
+                  <MaterialIcons name="keyboard-arrow-down" size={18} color={Brand.muted} />
+                ) : null}
+              </Pressable>
+              {renderOddCell(match, totalsKey, overOutcome, overLabel)}
+              {renderOddCell(match, totalsKey, underOutcome, underLabel)}
+            </>
+          ) : null}
+          {marketKey === "btts" ? (
+            <>
+              {renderOddCell(match, "btts", bttsYes)}
+              {renderOddCell(match, "btts", bttsNo)}
+            </>
+          ) : null}
+          {marketKey === "draw_no_bet" ? (
+            <>
+              {renderOddCell(match, "draw_no_bet", dnbHome, "Home")}
+              {renderOddCell(match, "draw_no_bet", dnbAway, "Away")}
+            </>
+          ) : null}
+          {marketKey === "h2h_3_way" ? (
+            <>
+              {renderOddCell(match, "h2h_3_way", threeWayHome)}
+              {renderOddCell(match, "h2h_3_way", threeWayDraw)}
+              {renderOddCell(match, "h2h_3_way", threeWayAway)}
+            </>
+          ) : null}
+          {marketKey === "spreads" ? (
+            <>
+              {renderOddCell(match, "spreads", spreadHome)}
+              {renderOddCell(match, "spreads", spreadAway)}
+            </>
+          ) : null}
           <Pressable
-            style={[styles.goalsCell, !activeLine && styles.goalsCellDisabled]}
-            onPress={() => {
-              if (!canCycleLine || activeLine == null) return;
-              const currentIndex = lineOptions.indexOf(activeLine);
-              const nextLine = lineOptions[(currentIndex + 1) % lineOptions.length];
-              setGoalLines((current) => ({ ...current, [match.id]: nextLine }));
-            }}
-            disabled={!canCycleLine}
+            style={styles.moreCell}
+            onPress={() =>
+              router.push({
+                pathname: "/markets/[eventId]",
+                params: {
+                  eventId: match.id,
+                  sportKey: match.sportKey,
+                  homeTeam: match.homeTeam,
+                  awayTeam: match.awayTeam,
+                  league: match.sportTitle,
+                },
+              })
+            }
           >
-            <Text style={[styles.goalsText, !activeLine && styles.goalsTextDisabled]}>
-              {lineLabel}
-            </Text>
-            {canCycleLine ? (
-              <MaterialIcons name="keyboard-arrow-down" size={18} color={Brand.muted} />
-            ) : null}
-          </Pressable>
-          {renderOddCell(match, totalsKey, overOutcome, overLabel)}
-          {renderOddCell(match, totalsKey, underOutcome, underLabel)}
-          <View style={styles.moreCell}>
             <Text style={styles.moreText}>+{extraCount}</Text>
             <MaterialIcons name="chevron-right" size={16} color={Brand.muted} />
-          </View>
+          </Pressable>
         </ScrollView>
       </View>
     );
@@ -466,20 +556,57 @@ export default function HomeScreen() {
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <View style={styles.marketHeader}>
-            <View style={styles.marketHeaderLeft}>
+            <View style={[styles.marketHeaderLeft, { width: leftColWidth }]}>
               <Text style={styles.marketHeaderLabel}>Match</Text>
             </View>
             <ScrollView
+              style={styles.oddsScroll}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.oddsGroup}
             >
-              <Text style={styles.headerCell}>1</Text>
-              <Text style={styles.headerCell}>X</Text>
-              <Text style={styles.headerCell}>2</Text>
-              <Text style={styles.headerCell}>Goals</Text>
-              <Text style={styles.headerCell}>Over</Text>
-              <Text style={styles.headerCell}>Under</Text>
+              {marketKey === "h2h" ? (
+                <>
+                  <Text style={styles.headerCell}>1</Text>
+                  <Text style={styles.headerCell}>X</Text>
+                  <Text style={styles.headerCell}>2</Text>
+                  <Text style={styles.headerCell}>Goals</Text>
+                  <Text style={styles.headerCell}>Over</Text>
+                  <Text style={styles.headerCell}>Under</Text>
+                </>
+              ) : null}
+              {marketKey === "totals" ? (
+                <>
+                  <Text style={styles.headerCell}>Goals</Text>
+                  <Text style={styles.headerCell}>Over</Text>
+                  <Text style={styles.headerCell}>Under</Text>
+                </>
+              ) : null}
+              {marketKey === "btts" ? (
+                <>
+                  <Text style={styles.headerCell}>Yes</Text>
+                  <Text style={styles.headerCell}>No</Text>
+                </>
+              ) : null}
+              {marketKey === "draw_no_bet" ? (
+                <>
+                  <Text style={styles.headerCell}>Home</Text>
+                  <Text style={styles.headerCell}>Away</Text>
+                </>
+              ) : null}
+              {marketKey === "h2h_3_way" ? (
+                <>
+                  <Text style={styles.headerCell}>1</Text>
+                  <Text style={styles.headerCell}>X</Text>
+                  <Text style={styles.headerCell}>2</Text>
+                </>
+              ) : null}
+              {marketKey === "spreads" ? (
+                <>
+                  <Text style={styles.headerCell}>Home</Text>
+                  <Text style={styles.headerCell}>Away</Text>
+                </>
+              ) : null}
               <Text style={styles.headerCell}>+M</Text>
             </ScrollView>
           </View>
@@ -495,20 +622,57 @@ export default function HomeScreen() {
           ) : (
             <>
               <View style={styles.marketHeader}>
-                <View style={styles.marketHeaderLeft}>
+                <View style={[styles.marketHeaderLeft, { width: leftColWidth }]}>
                   <Text style={styles.marketHeaderLabel}>Live Match</Text>
                 </View>
                 <ScrollView
+                  style={styles.oddsScroll}
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.oddsGroup}
                 >
-                  <Text style={styles.headerCell}>1</Text>
-                  <Text style={styles.headerCell}>X</Text>
-                  <Text style={styles.headerCell}>2</Text>
-                  <Text style={styles.headerCell}>Goals</Text>
-                  <Text style={styles.headerCell}>Over</Text>
-                  <Text style={styles.headerCell}>Under</Text>
+                  {marketKey === "h2h" ? (
+                    <>
+                      <Text style={styles.headerCell}>1</Text>
+                      <Text style={styles.headerCell}>X</Text>
+                      <Text style={styles.headerCell}>2</Text>
+                      <Text style={styles.headerCell}>Goals</Text>
+                      <Text style={styles.headerCell}>Over</Text>
+                      <Text style={styles.headerCell}>Under</Text>
+                    </>
+                  ) : null}
+                  {marketKey === "totals" ? (
+                    <>
+                      <Text style={styles.headerCell}>Goals</Text>
+                      <Text style={styles.headerCell}>Over</Text>
+                      <Text style={styles.headerCell}>Under</Text>
+                    </>
+                  ) : null}
+                  {marketKey === "btts" ? (
+                    <>
+                      <Text style={styles.headerCell}>Yes</Text>
+                      <Text style={styles.headerCell}>No</Text>
+                    </>
+                  ) : null}
+                  {marketKey === "draw_no_bet" ? (
+                    <>
+                      <Text style={styles.headerCell}>Home</Text>
+                      <Text style={styles.headerCell}>Away</Text>
+                    </>
+                  ) : null}
+                  {marketKey === "h2h_3_way" ? (
+                    <>
+                      <Text style={styles.headerCell}>1</Text>
+                      <Text style={styles.headerCell}>X</Text>
+                      <Text style={styles.headerCell}>2</Text>
+                    </>
+                  ) : null}
+                  {marketKey === "spreads" ? (
+                    <>
+                      <Text style={styles.headerCell}>Home</Text>
+                      <Text style={styles.headerCell}>Away</Text>
+                    </>
+                  ) : null}
                   <Text style={styles.headerCell}>+M</Text>
                 </ScrollView>
               </View>
@@ -675,8 +839,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   marketHeaderLeft: {
-    flex: 1,
-    minWidth: 180,
+    flexShrink: 0,
   },
   marketHeaderLabel: {
     color: Brand.muted,
@@ -700,9 +863,12 @@ const styles = StyleSheet.create({
   matchInfo: {
     flexDirection: "row",
     alignItems: "center",
-    flex: 1,
-    minWidth: 180,
+    flexShrink: 0,
     paddingRight: 8,
+  },
+  oddsScroll: {
+    flex: 1,
+    minWidth: 0,
   },
   timeCol: {
     width: 62,
@@ -729,7 +895,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingLeft: 6,
-    paddingRight: 6,
+    paddingRight: 16,
   },
   oddCell: {
     width: 58,
