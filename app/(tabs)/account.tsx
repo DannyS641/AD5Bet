@@ -22,6 +22,11 @@ export default function AccountScreen() {
   const router = useRouter();
   const { user, signOut, refreshMfaStatus } = useAuth();
   const insets = useSafeAreaInsets();
+  const adminEmails = (process.env.EXPO_PUBLIC_ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  const isAdmin = Boolean(user?.email && adminEmails.includes(user.email.toLowerCase()));
   const [loading, setLoading] = useState(false);
   const [profileName, setProfileName] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -198,6 +203,7 @@ export default function AccountScreen() {
           { label: 'Wallet', href: '/wallet' },
           { label: 'Promotions', href: '/modal' },
           { label: 'Help Center', href: '/modal' },
+          ...(isAdmin ? [{ label: 'Jackpot Admin', href: '/jackpot-admin' }] : []),
         ].map((item) => (
           <Link key={item.label} href={item.href} asChild>
             <Pressable style={styles.menuItem}>
