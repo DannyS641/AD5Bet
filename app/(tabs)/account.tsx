@@ -167,8 +167,8 @@ export default function AccountScreen() {
               <Text style={styles.statusText}>2FA Enabled</Text>
             </View>
           ) : (
-            <Pressable style={styles.primaryBtn} onPress={handleEnroll2fa}>
-              <Text style={styles.primaryText}>Enable 2FA</Text>
+            <Pressable style={styles.smallPrimaryBtn} onPress={handleEnroll2fa}>
+              <Text style={styles.smallPrimaryText}>Enable 2FA</Text>
             </Pressable>
           )}
 
@@ -201,8 +201,8 @@ export default function AccountScreen() {
         {[
           { label: 'My Bets', href: '/(tabs)/betslip' },
           { label: 'Wallet', href: '/wallet' },
-          { label: 'Promotions', href: '/modal' },
-          { label: 'Help Center', href: '/modal' },
+          { label: 'Promotions', href: '/promotions' },
+          { label: 'Help Center', href: '/help-center' },
           ...(isAdmin ? [{ label: 'Jackpot Admin', href: '/jackpot-admin' }] : []),
         ].map((item) => (
           <Link key={item.label} href={item.href} asChild>
@@ -271,6 +271,19 @@ const styles = StyleSheet.create({
   primaryText: {
     color: Brand.card,
     fontWeight: '700',
+  },
+  smallPrimaryBtn: {
+    backgroundColor: Brand.navy,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+    marginTop: 10,
+  },
+  smallPrimaryText: {
+    color: Brand.card,
+    fontWeight: '700',
+    fontSize: 12,
   },
   secondaryBtn: {
     borderWidth: 1,

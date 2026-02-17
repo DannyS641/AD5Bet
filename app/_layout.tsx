@@ -27,6 +27,8 @@ export default function RootLayout() {
           <Stack.Screen name="mfa" options={{ title: 'Two-Factor' }} />
           <Stack.Screen name="wallet" options={{ title: 'Wallet' }} />
           <Stack.Screen name="withdraw" options={{ title: 'Withdraw' }} />
+          <Stack.Screen name="promotions" options={{ title: 'Promotions' }} />
+          <Stack.Screen name="help-center" options={{ title: 'Help Center' }} />
           <Stack.Screen name="markets/[eventId]" options={{ title: 'Markets' }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
