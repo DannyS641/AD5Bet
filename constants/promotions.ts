@@ -6,6 +6,7 @@ export type Promotion = {
   cta: string;
   badgeTop: string;
   badgeBottom: string;
+  href?: string;
 };
 
 export const promotions: Promotion[] = [
@@ -17,6 +18,7 @@ export const promotions: Promotion[] = [
     cta: "Join Now",
     badgeTop: "+12%",
     badgeBottom: "Boost",
+    href: "/(tabs)",
   },
   {
     id: "midweek-multipliers",
@@ -26,6 +28,7 @@ export const promotions: Promotion[] = [
     cta: "Boost Picks",
     badgeTop: "+8%",
     badgeBottom: "Boost",
+    href: "/(tabs)",
   },
   {
     id: "derby-day-flash",
@@ -35,6 +38,7 @@ export const promotions: Promotion[] = [
     cta: "Play Derby",
     badgeTop: "+15%",
     badgeBottom: "Boost",
+    href: "/(tabs)",
   },
   {
     id: "live-kickoff-rush",
@@ -44,6 +48,7 @@ export const promotions: Promotion[] = [
     cta: "Go Live",
     badgeTop: "+10%",
     badgeBottom: "Boost",
+    href: "/(tabs)/live",
   },
   {
     id: "jackpot-fuel",
@@ -53,6 +58,7 @@ export const promotions: Promotion[] = [
     cta: "Top Up",
     badgeTop: "+5%",
     badgeBottom: "Bonus",
+    href: "/(tabs)/jackpot",
   },
   {
     id: "weekend-goals",
@@ -62,5 +68,6 @@ export const promotions: Promotion[] = [
     cta: "Get Goals",
     badgeTop: "+18%",
     badgeBottom: "Boost",
+    href: "/(tabs)",
   },
 ];

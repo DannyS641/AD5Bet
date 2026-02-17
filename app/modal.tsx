@@ -1,17 +1,27 @@
 import { useCallback, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { useRouter } from "expo-router";
 
 import { Brand } from "@/constants/brand";
 import { promotions } from "@/constants/promotions";
 
 export default function PromotionsScreen() {
   const [refreshing, setRefreshing] = useState(false);
+  const router = useRouter();
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 400);
   }, []);
+
+  const handlePromoPress = useCallback(
+    (href?: string) => {
+      if (!href) return;
+      router.push(href);
+    },
+    [router],
+  );
   return (
     <ScrollView
       contentContainerStyle={styles.container}
@@ -23,23 +33,35 @@ export default function PromotionsScreen() {
         <Text style={styles.subtitle}>Fresh boosts and bonuses to power your bets.</Text>
       </View>
 
-      {promotions.map((promo) => (
-        <View key={promo.id} style={styles.card}>
-          <View style={styles.cardLeft}>
-            <Text style={styles.label}>{promo.label}</Text>
-            <Text style={styles.cardTitle}>{promo.title}</Text>
-            <Text style={styles.cardCopy}>{promo.copy}</Text>
-            <Pressable style={styles.ctaBtn}>
-              <Text style={styles.ctaText}>{promo.cta}</Text>
-              <MaterialIcons name="chevron-right" size={18} color={Brand.card} />
-            </Pressable>
-          </View>
-          <View style={styles.badge}>
-            <Text style={styles.badgeTop}>{promo.badgeTop}</Text>
-            <Text style={styles.badgeBottom}>{promo.badgeBottom}</Text>
-          </View>
-        </View>
-      ))}
+      {promotions.map((promo) => {
+        const isClickable = Boolean(promo.href);
+        return (
+          <Pressable
+            key={promo.id}
+            style={[styles.card, !isClickable && styles.cardDisabled]}
+            onPress={() => handlePromoPress(promo.href)}
+            disabled={!isClickable}
+          >
+            <View style={styles.cardLeft}>
+              <Text style={styles.label}>{promo.label}</Text>
+              <Text style={styles.cardTitle}>{promo.title}</Text>
+              <Text style={styles.cardCopy}>{promo.copy}</Text>
+              <Pressable
+                style={[styles.ctaBtn, !isClickable && styles.ctaBtnDisabled]}
+                onPress={() => handlePromoPress(promo.href)}
+                disabled={!isClickable}
+              >
+                <Text style={styles.ctaText}>{promo.cta}</Text>
+                <MaterialIcons name="chevron-right" size={18} color={Brand.card} />
+              </Pressable>
+            </View>
+            <View style={styles.badge}>
+              <Text style={styles.badgeTop}>{promo.badgeTop}</Text>
+              <Text style={styles.badgeBottom}>{promo.badgeBottom}</Text>
+            </View>
+          </Pressable>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -70,6 +92,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 16,
+  },
+  cardDisabled: {
+    opacity: 0.9,
   },
   cardLeft: {
     flex: 1,
@@ -103,6 +128,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     gap: 4,
+  },
+  ctaBtnDisabled: {
+    opacity: 0.8,
   },
   ctaText: {
     color: Brand.navyDeep,
