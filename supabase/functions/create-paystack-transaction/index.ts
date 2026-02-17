@@ -1,7 +1,7 @@
 // Supabase Edge Function: create-paystack-transaction
 // Requires PAYSTACK_SECRET_KEY, SUPABASE_URL, and SUPABASE_ANON_KEY to be set in Supabase secrets.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1?target=deno";
+import { createClient } from "@supabase/supabase-js";
 
 const PAYSTACK_URL = "https://api.paystack.co/transaction/initialize";
 
@@ -32,43 +32,44 @@ Deno.serve(async (req: Request) => {
 
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
-      return new Response(
-        JSON.stringify({ error: "Server misconfigured." }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "Server misconfigured." }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const authHeader = req.headers.get("Authorization") ?? req.headers.get("authorization") ?? "";
+    const authHeader =
+      req.headers.get("Authorization") ??
+      req.headers.get("authorization") ??
+      "";
     const token = authHeader.replace(/bearer\s+/i, "").trim();
     if (!token) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized." }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized." }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const { data: userData, error: userError } = await getSupabaseClient().auth.getUser(token);
+    const { data: userData, error: userError } =
+      await getSupabaseClient().auth.getUser(token);
     if (userError || !userData?.user) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized." }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized." }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const { amount, callbackUrl } = await req.json();
     const email = userData.user.email;
     const metadata = { userId: userData.user.id };
 
-    if (!amount || amount <= 0 || !email || typeof callbackUrl !== "string" || !callbackUrl.length) {
+    if (
+      !amount ||
+      amount <= 0 ||
+      !email ||
+      typeof callbackUrl !== "string" ||
+      !callbackUrl.length
+    ) {
       return new Response(
         JSON.stringify({ error: "Missing amount, email, or callback URL." }),
         {
