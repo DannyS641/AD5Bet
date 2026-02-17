@@ -23,6 +23,19 @@ create table if not exists public.wallet_transactions (
   created_at timestamptz default now()
 );
 
+create table if not exists public.withdrawal_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users on delete cascade,
+  amount numeric not null,
+  currency text not null default 'NGN',
+  bank_name text not null,
+  bank_code text not null,
+  account_number text not null,
+  account_name text not null,
+  status text not null default 'pending',
+  created_at timestamptz default now()
+);
+
 create table if not exists public.jackpots (
   id uuid primary key default gen_random_uuid(),
   title text not null,
@@ -150,6 +163,92 @@ begin
   end if;
 
   return next_balance;
+end;
+$$;
+
+create or replace function public.request_withdrawal(
+  p_user_id uuid,
+  p_amount numeric,
+  p_currency text,
+  p_bank_name text,
+  p_bank_code text,
+  p_account_number text,
+  p_account_name text
+)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_balance numeric;
+  v_request_id uuid;
+begin
+  if p_user_id is null then
+    raise exception 'Unauthorized';
+  end if;
+
+  if auth.role() <> 'service_role' and auth.uid() <> p_user_id then
+    raise exception 'Unauthorized';
+  end if;
+
+  if p_amount < 100 then
+    raise exception 'Minimum withdrawal is 100';
+  end if;
+
+  select balance into v_balance
+  from public.wallets
+  where user_id = p_user_id
+  for update;
+
+  if v_balance is null then
+    v_balance := 0;
+  end if;
+
+  if v_balance < p_amount then
+    raise exception 'Insufficient balance';
+  end if;
+
+  update public.wallets
+  set balance = v_balance - p_amount,
+      updated_at = now()
+  where user_id = p_user_id
+  returning balance into v_balance;
+
+  insert into public.withdrawal_requests (
+    user_id,
+    amount,
+    currency,
+    bank_name,
+    bank_code,
+    account_number,
+    account_name,
+    status
+  )
+  values (
+    p_user_id,
+    p_amount,
+    p_currency,
+    p_bank_name,
+    p_bank_code,
+    p_account_number,
+    p_account_name,
+    'pending'
+  )
+  returning id into v_request_id;
+
+  insert into public.wallet_transactions (user_id, reference, amount, currency, provider, status)
+  values (
+    p_user_id,
+    'withdrawal-' || v_request_id::text,
+    -p_amount,
+    p_currency,
+    'withdrawal',
+    'pending'
+  )
+  on conflict (reference) do nothing;
+
+  return json_build_object('request_id', v_request_id, 'balance', v_balance);
 end;
 $$;
 
@@ -350,6 +449,7 @@ for each row execute procedure public.handle_new_user();
 alter table public.profiles enable row level security;
 alter table public.wallets enable row level security;
 alter table public.wallet_transactions enable row level security;
+alter table public.withdrawal_requests enable row level security;
 alter table public.jackpots enable row level security;
 alter table public.jackpot_events enable row level security;
 alter table public.jackpot_entries enable row level security;
@@ -363,6 +463,8 @@ drop policy if exists "Wallets are viewable by owner" on public.wallets;
 drop policy if exists "Wallets can be updated by owner" on public.wallets;
 drop policy if exists "Wallets can be inserted by owner" on public.wallets;
 drop policy if exists "Wallet transactions are viewable by owner" on public.wallet_transactions;
+drop policy if exists "Withdrawal requests are viewable by owner" on public.withdrawal_requests;
+drop policy if exists "Withdrawal requests can be inserted by owner" on public.withdrawal_requests;
 drop policy if exists "Jackpots are viewable by all" on public.jackpots;
 drop policy if exists "Jackpot events are viewable by all" on public.jackpot_events;
 drop policy if exists "Jackpot results are viewable by all" on public.jackpot_results;
@@ -395,6 +497,14 @@ with check (auth.uid() = user_id);
 create policy "Wallet transactions are viewable by owner"
 on public.wallet_transactions for select
 using (auth.uid() = user_id);
+
+create policy "Withdrawal requests are viewable by owner"
+on public.withdrawal_requests for select
+using (auth.uid() = user_id);
+
+create policy "Withdrawal requests can be inserted by owner"
+on public.withdrawal_requests for insert
+with check (auth.uid() = user_id);
 
 create policy "Jackpots are viewable by all"
 on public.jackpots for select
@@ -431,3 +541,4 @@ with check (auth.uid() = user_id);
 create index if not exists jackpot_events_jackpot_id_idx on public.jackpot_events (jackpot_id);
 create index if not exists jackpot_entries_jackpot_id_idx on public.jackpot_entries (jackpot_id);
 create index if not exists jackpot_entries_user_id_idx on public.jackpot_entries (user_id);
+create index if not exists withdrawal_requests_user_id_idx on public.withdrawal_requests (user_id);

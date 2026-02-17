@@ -1,2 +1,11 @@
 [functions."Odds-API"]
 verify_jwt = false
+
+[functions."paystack-banks"]
+verify_jwt = false
+
+[functions."resolve-bank-account"]
+verify_jwt = false
+
+[functions."create-withdrawal-request"]
+verify_jwt = false
