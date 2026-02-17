@@ -7,8 +7,7 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
-  ScrollView,
-  RefreshControl,
+  FlatList,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as WebBrowser from "expo-web-browser";
@@ -51,6 +50,8 @@ const clearWebReference = () => {
   url.searchParams.delete("trxref");
   window.history.replaceState({}, "", url.toString());
 };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function WalletScreen() {
   const { user } = useAuth();
@@ -107,28 +108,51 @@ export default function WalletScreen() {
         return;
       }
 
-      const { data: verifyData, error: verifyError } = await supabase.functions.invoke(
-        "verify-paystack-transaction",
-        {
-          body: { reference },
-          headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
-        },
-      );
+      const delays = [0, 3000, 5000, 8000, 13000, 21000];
 
-      if (verifyError || verifyData?.status !== "success") {
-        setError(verifyError?.message ?? "Payment verification failed.");
-        setLoading(false);
-        return;
+      for (let attempt = 0; attempt < delays.length; attempt += 1) {
+        if (delays[attempt] > 0) {
+          await sleep(delays[attempt]);
+        }
+
+        const { data: verifyData, error: verifyError } = await supabase.functions.invoke(
+          "verify-paystack-transaction",
+          {
+            body: { reference },
+            headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
+          },
+        );
+
+        if (verifyError) {
+          setError(verifyError.message ?? "Payment verification failed.");
+          setLoading(false);
+          return;
+        }
+
+        const status = String(verifyData?.status ?? "").toLowerCase();
+        if (status === "success") {
+          if (verifyData?.walletBalance !== null && verifyData?.walletBalance !== undefined) {
+            const parsedBalance = Number(verifyData.walletBalance);
+            setBalance((prev) => (Number.isNaN(parsedBalance) ? prev : parsedBalance));
+          } else {
+            await loadWallet();
+          }
+
+          await loadTransactions();
+          await AsyncStorage.removeItem(pendingReferenceKey);
+          setLoading(false);
+          return;
+        }
+
+        if (["failed", "abandoned", "reversed"].includes(status)) {
+          setError("Payment failed. Please try again.");
+          setLoading(false);
+          return;
+        }
       }
 
-      if (verifyData?.walletBalance !== null && verifyData?.walletBalance !== undefined) {
-        const parsedBalance = Number(verifyData.walletBalance);
-        setBalance((prev) => (Number.isNaN(parsedBalance) ? prev : parsedBalance));
-      } else {
-        await loadWallet();
-      }
-
-      await loadTransactions();
+      await AsyncStorage.setItem(pendingReferenceKey, reference);
+      setError("Transfer is still pending. We'll update once it confirms.");
       setLoading(false);
     },
     [loadTransactions, loadWallet, user],
@@ -240,38 +264,33 @@ export default function WalletScreen() {
     return `${normalizedCurrency} ${safeAmount.toLocaleString()}`;
   }, []);
 
-  const transactionItems = useMemo(
-    () =>
-      transactions.map((tx) => {
-        const createdAt = tx.created_at ? new Date(tx.created_at) : null;
-        const status = (tx.status ?? "unknown").toUpperCase();
-        const statusColor = status === "SUCCESS" ? Brand.green : status === "FAILED" ? Brand.red : Brand.muted;
+  const renderTransactionItem = useCallback(
+    ({ item }: { item: WalletTransaction }) => {
+      const createdAt = item.created_at ? new Date(item.created_at) : null;
+      const status = (item.status ?? "unknown").toUpperCase();
+      const statusColor = status === "SUCCESS" ? Brand.green : status === "FAILED" ? Brand.red : Brand.muted;
 
-        return (
-          <View key={tx.id} style={styles.transactionCard}>
-            <View style={styles.transactionRow}>
-              <Text style={styles.transactionAmount}>{renderAmount(tx.amount, tx.currency)}</Text>
-              <Text style={[styles.transactionStatus, { color: statusColor }]}>{status}</Text>
-            </View>
-            <View style={styles.transactionRow}>
-              <Text style={styles.transactionMeta}>
-                {createdAt ? createdAt.toLocaleString() : "Date unavailable"}
-              </Text>
-              <Text style={styles.transactionMeta}>{(tx.provider ?? "Paystack").toUpperCase()}</Text>
-            </View>
-            <Text style={styles.transactionRef}>Ref: {tx.reference}</Text>
+      return (
+        <View style={styles.transactionCard}>
+          <View style={styles.transactionRow}>
+            <Text style={styles.transactionAmount}>{renderAmount(item.amount, item.currency)}</Text>
+            <Text style={[styles.transactionStatus, { color: statusColor }]}>{status}</Text>
           </View>
-        );
-      }),
-    [renderAmount, transactions],
+          <View style={styles.transactionRow}>
+            <Text style={styles.transactionMeta}>
+              {createdAt ? createdAt.toLocaleString() : "Date unavailable"}
+            </Text>
+            <Text style={styles.transactionMeta}>{(item.provider ?? "Paystack").toUpperCase()}</Text>
+          </View>
+          <Text style={styles.transactionRef}>Ref: {item.reference}</Text>
+        </View>
+      );
+    },
+    [renderAmount],
   );
 
-  return (
-    <ScrollView
-      contentContainerStyle={[styles.container, { paddingTop: 24 + insets.top }]}
-      showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    >
+  const listHeader = (
+    <View>
       <Text style={styles.title}>Wallet</Text>
       <Text style={styles.subtitle}>Add funds to place bets instantly.</Text>
 
@@ -296,30 +315,46 @@ export default function WalletScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.transactions}>
+      <View style={styles.transactionsHeader}>
         <Text style={styles.sectionTitle}>Transaction history</Text>
         {transactionsLoading ? <ActivityIndicator color={Brand.navy} /> : null}
         {transactionsError ? <Text style={styles.errorText}>{transactionsError}</Text> : null}
-        {!transactionsLoading && !transactionsError && transactions.length === 0 ? (
-          <Text style={styles.emptyText}>No transactions yet.</Text>
-        ) : null}
-        {!transactionsLoading && !transactionsError ? transactionItems : null}
       </View>
-    </ScrollView>
+    </View>
+  );
+
+  const isEmpty = !transactionsLoading && !transactionsError && transactions.length === 0;
+
+  return (
+    <FlatList
+      data={transactions}
+      keyExtractor={(item) => item.id}
+      renderItem={renderTransactionItem}
+      ListHeaderComponent={listHeader}
+      ListEmptyComponent={isEmpty ? <Text style={styles.emptyText}>No transactions yet.</Text> : null}
+      contentContainerStyle={[styles.listContent, { paddingTop: 16 }]}
+      style={styles.list}
+      showsVerticalScrollIndicator={false}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  list: {
     flex: 1,
     backgroundColor: Brand.background,
+  },
+  listContent: {
     padding: 24,
+    paddingBottom: 48,
   },
   title: {
     fontSize: 24,
     fontWeight: "800",
     color: Brand.navy,
-    marginTop: 24,
+    marginTop: 0,
   },
   subtitle: {
     color: Brand.muted,
@@ -370,9 +405,10 @@ const styles = StyleSheet.create({
     color: "#d15353",
     fontWeight: "600",
   },
-  transactions: {
+  transactionsHeader: {
     marginTop: 28,
     gap: 12,
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 18,
@@ -390,6 +426,7 @@ const styles = StyleSheet.create({
     borderColor: Brand.border,
     padding: 14,
     gap: 6,
+    marginBottom: 12,
   },
   transactionRow: {
     flexDirection: "row",

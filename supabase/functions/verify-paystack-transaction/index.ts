@@ -1,8 +1,6 @@
 // Supabase Edge Function: verify-paystack-transaction
 // Requires PAYSTACK_SECRET_KEY, SUPABASE_URL, and SUPABASE_SERVICE_ROLE_KEY to be set in Supabase secrets.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -11,9 +9,6 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false },
-});
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -54,11 +49,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const data = payload?.data ?? {};
-    if (data.status !== "success") {
-      return new Response(JSON.stringify({ error: "Payment not successful." }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const normalizedStatus = String(data.status ?? "unknown").toLowerCase();
+    if (normalizedStatus !== "success") {
+      return new Response(
+        JSON.stringify({
+          status: normalizedStatus,
+          reference: data.reference ?? reference,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const metadata = data.metadata ?? {};
@@ -88,26 +89,35 @@ Deno.serve(async (req: Request) => {
     const currency = data.currency ?? "NGN";
     const amountValue = amountKobo / 100;
 
-    const { data: walletBalanceRaw, error: walletError } = await supabaseAdmin.rpc(
-      "credit_wallet_from_payment",
-      {
+    const rpcResponse = await fetch(`${supabaseUrl}/rest/v1/rpc/credit_wallet_from_payment`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${supabaseServiceKey}`,
+        apikey: supabaseServiceKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         p_user_id: userId,
         p_reference: data.reference,
         p_amount: amountValue,
         p_currency: currency,
-      },
-    );
+      }),
+    });
 
-    if (walletError) {
-      return new Response(JSON.stringify({ error: walletError.message ?? "Wallet update failed." }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!rpcResponse.ok) {
+      const rpcError = await rpcResponse.json().catch(() => ({}));
+      return new Response(
+        JSON.stringify({ error: rpcError?.message ?? "Wallet update failed." }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
-    const walletBalance = walletBalanceRaw === null || walletBalanceRaw === undefined
-      ? null
-      : Number(walletBalanceRaw);
+    const walletBalanceRaw = await rpcResponse.json();
+    const walletBalance =
+      walletBalanceRaw === null || walletBalanceRaw === undefined ? null : Number(walletBalanceRaw);
 
     return new Response(
       JSON.stringify({
