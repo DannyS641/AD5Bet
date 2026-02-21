@@ -9,3 +9,12 @@ verify_jwt = false
 
 [functions."create-withdrawal-request"]
 verify_jwt = false
+
+[functions."paystack-direct-debit-init"]
+verify_jwt = false
+
+[functions."paystack-direct-debit-webhook"]
+verify_jwt = false
+
+[functions."auto-topup-check"]
+verify_jwt = false

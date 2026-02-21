@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -28,6 +28,39 @@ type WalletTransaction = {
   status: string | null;
   provider: string | null;
   created_at: string | null;
+};
+
+type AutoTopupSettings = {
+  enabled: boolean;
+  threshold: number;
+  topup_amount: number;
+  currency: string | null;
+  authorization_status: string | null;
+  authorization_reference: string | null;
+  authorization_active_at: string | null;
+  last_attempt_status: string | null;
+};
+
+const defaultAutoTopupSettings: AutoTopupSettings = {
+  enabled: false,
+  threshold: 10000,
+  topup_amount: 10000,
+  currency: "NGN",
+  authorization_status: "none",
+  authorization_reference: null,
+  authorization_active_at: null,
+  last_attempt_status: null,
+};
+
+type AutoTopupAttempt = {
+  id: string;
+  reference: string;
+  amount: number | string;
+  currency: string | null;
+  status: string | null;
+  initiated_at: string | null;
+  completed_at: string | null;
+  error: string | null;
 };
 
 const normalizeReference = (value: string | string[] | undefined) => {
@@ -64,7 +97,18 @@ export default function WalletScreen() {
   const [transactionsLoading, setTransactionsLoading] = useState(false);
   const [transactionsError, setTransactionsError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
+  const [autoTopupSettings, setAutoTopupSettings] =
+    useState<AutoTopupSettings>(defaultAutoTopupSettings);
+  const [autoTopupLoading, setAutoTopupLoading] = useState(false);
+  const [autoTopupSaving, setAutoTopupSaving] = useState(false);
+  const [autoTopupLinking, setAutoTopupLinking] = useState(false);
+  const [autoTopupChecking, setAutoTopupChecking] = useState(false);
+  const [autoTopupNotice, setAutoTopupNotice] = useState<string | null>(null);
+  const [autoTopupError, setAutoTopupError] = useState<string | null>(null);
+  const [autoTopupAttempts, setAutoTopupAttempts] = useState<AutoTopupAttempt[]>([]);
+  const [autoTopupAttemptsLoading, setAutoTopupAttemptsLoading] = useState(false);
+  const [autoTopupAttemptsError, setAutoTopupAttemptsError] = useState<string | null>(null);
+  const autoTopupCheckInFlight = useRef(false);
   const loadWallet = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase.from("wallets").select("balance").eq("user_id", user.id).single();
@@ -94,6 +138,170 @@ export default function WalletScreen() {
     setTransactions((data ?? []) as WalletTransaction[]);
     setTransactionsLoading(false);
   }, [user]);
+
+  const loadAutoTopupSettings = useCallback(async () => {
+    if (!user) return;
+    setAutoTopupLoading(true);
+    setAutoTopupError(null);
+
+    const { data, error: settingsError } = await supabase
+      .from("auto_topup_settings")
+      .select(
+        "enabled, threshold, topup_amount, currency, authorization_status, authorization_reference, authorization_active_at, last_attempt_status",
+      )
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (settingsError) {
+      setAutoTopupError(settingsError.message ?? "Unable to load auto top-up settings.");
+      setAutoTopupSettings(defaultAutoTopupSettings);
+      setAutoTopupLoading(false);
+      return;
+    }
+
+    if (!data) {
+      setAutoTopupSettings(defaultAutoTopupSettings);
+      setAutoTopupLoading(false);
+      return;
+    }
+
+    setAutoTopupSettings({ ...defaultAutoTopupSettings, ...data });
+    setAutoTopupLoading(false);
+  }, [user]);
+
+  const loadAutoTopupAttempts = useCallback(async () => {
+    if (!user) return;
+    setAutoTopupAttemptsLoading(true);
+    setAutoTopupAttemptsError(null);
+
+    const { data, error: attemptsError } = await supabase
+      .from("auto_topup_attempts")
+      .select("id, reference, amount, currency, status, initiated_at, completed_at, error")
+      .eq("user_id", user.id)
+      .order("initiated_at", { ascending: false })
+      .limit(5);
+
+    if (attemptsError) {
+      setAutoTopupAttemptsError(attemptsError.message ?? "Unable to load auto top-up history.");
+      setAutoTopupAttempts([]);
+      setAutoTopupAttemptsLoading(false);
+      return;
+    }
+
+    setAutoTopupAttempts((data ?? []) as AutoTopupAttempt[]);
+    setAutoTopupAttemptsLoading(false);
+  }, [user]);
+
+  const saveAutoTopupSettings = useCallback(
+    async (enabled: boolean) => {
+      if (!user) return;
+      setAutoTopupSaving(true);
+      setAutoTopupError(null);
+      setAutoTopupNotice(null);
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.access_token) {
+        setAutoTopupError("Please sign in again.");
+        setAutoTopupSaving(false);
+        return;
+      }
+
+      const { data, error: saveError } = await supabase.rpc("upsert_auto_topup_settings", {
+        p_enabled: enabled,
+        p_threshold: 10000,
+        p_topup_amount: 10000,
+        p_currency: "NGN",
+      });
+
+      if (saveError) {
+        setAutoTopupError(saveError.message ?? "Unable to save auto top-up settings.");
+        setAutoTopupSaving(false);
+        return;
+      }
+
+      if (data) {
+        setAutoTopupSettings((current) => ({ ...current, ...data, enabled }));
+      } else {
+        await loadAutoTopupSettings();
+      }
+
+      setAutoTopupSaving(false);
+    },
+    [loadAutoTopupSettings, user],
+  );
+
+  const startDirectDebitLink = useCallback(async () => {
+    if (!user) return;
+    setAutoTopupLinking(true);
+    setAutoTopupError(null);
+    setAutoTopupNotice(null);
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session?.access_token) {
+      setAutoTopupError("Please sign in again.");
+      setAutoTopupLinking(false);
+      return;
+    }
+
+    const redirectUrl = Linking.createURL("/wallet");
+    const { data, error: initError } = await supabase.functions.invoke(
+      "paystack-direct-debit-init",
+      {
+        body: { callbackUrl: redirectUrl },
+        headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
+      },
+    );
+
+    if (initError || !data?.redirectUrl) {
+      setAutoTopupError(initError?.message ?? "Unable to start mandate setup.");
+      setAutoTopupLinking(false);
+      return;
+    }
+
+    if (Platform.OS === "web") {
+      await Linking.openURL(data.redirectUrl);
+    } else {
+      await WebBrowser.openAuthSessionAsync(data.redirectUrl, redirectUrl);
+    }
+
+    setAutoTopupNotice("Mandate request sent. We'll update once your bank confirms.");
+    await Promise.all([loadAutoTopupSettings(), loadAutoTopupAttempts()]);
+    setAutoTopupLinking(false);
+  }, [loadAutoTopupAttempts, loadAutoTopupSettings, user]);
+
+  const runAutoTopupCheck = useCallback(async () => {
+    if (!user || autoTopupCheckInFlight.current) return;
+    autoTopupCheckInFlight.current = true;
+    setAutoTopupChecking(true);
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.access_token) {
+        return;
+      }
+
+      const { data, error: checkError } = await supabase.functions.invoke("auto-topup-check", {
+        headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
+      });
+
+      if (checkError) {
+        return;
+      }
+
+      const status = String(data?.status ?? "");
+      if (status === "initiated") {
+        setAutoTopupNotice("Auto top-up requested. We'll update once it confirms.");
+      } else if (status === "pending") {
+        setAutoTopupNotice("Auto top-up is processing.");
+      }
+
+      await loadAutoTopupAttempts();
+    } finally {
+      autoTopupCheckInFlight.current = false;
+      setAutoTopupChecking(false);
+    }
+  }, [loadAutoTopupAttempts, user]);
+
 
   const verifyReference = useCallback(
     async (reference: string) => {
@@ -161,13 +369,23 @@ export default function WalletScreen() {
   useEffect(() => {
     loadWallet();
     loadTransactions();
-  }, [loadTransactions, loadWallet]);
+    loadAutoTopupSettings();
+    loadAutoTopupAttempts();
+    runAutoTopupCheck();
+  }, [
+    loadAutoTopupAttempts,
+    loadAutoTopupSettings,
+    loadTransactions,
+    loadWallet,
+    runAutoTopupCheck,
+  ]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadWallet(), loadTransactions()]);
+    await Promise.all([loadWallet(), loadTransactions(), loadAutoTopupSettings(), loadAutoTopupAttempts()]);
+    await runAutoTopupCheck();
     setRefreshing(false);
-  }, [loadTransactions, loadWallet]);
+  }, [loadAutoTopupAttempts, loadAutoTopupSettings, loadTransactions, loadWallet, runAutoTopupCheck]);
 
   useEffect(() => {
     if (!user) return;
@@ -289,6 +507,45 @@ export default function WalletScreen() {
     [renderAmount],
   );
 
+  const autoTopupEnabled = autoTopupSettings.enabled;
+  const autoTopupStatusLabel = useMemo(() => {
+    if (!autoTopupEnabled) return "Disabled";
+    switch (autoTopupSettings.authorization_status) {
+      case "active":
+        return "Bank linked";
+      case "created":
+        return "Awaiting activation";
+      case "pending":
+        return "Mandate pending";
+      default:
+        return "Not linked";
+    }
+  }, [autoTopupEnabled, autoTopupSettings.authorization_status]);
+
+  const renderAutoTopupAttempt = useCallback(
+    (item: AutoTopupAttempt) => {
+      const initiatedAt = item.initiated_at ? new Date(item.initiated_at) : null;
+      const status = (item.status ?? "unknown").toUpperCase();
+      const statusColor =
+        status === "SUCCESS" ? Brand.green : status === "FAILED" ? Brand.red : Brand.muted;
+
+      return (
+        <View key={item.id} style={styles.autoTopupAttemptCard}>
+          <View style={styles.transactionRow}>
+            <Text style={styles.transactionAmount}>{renderAmount(item.amount, item.currency)}</Text>
+            <Text style={[styles.transactionStatus, { color: statusColor }]}>{status}</Text>
+          </View>
+          <Text style={styles.transactionMeta}>
+            {initiatedAt ? initiatedAt.toLocaleString() : "Date unavailable"}
+          </Text>
+          <Text style={styles.transactionRef}>Ref: {item.reference}</Text>
+          {item.error ? <Text style={styles.autoTopupErrorText}>{item.error}</Text> : null}
+        </View>
+      );
+    },
+    [renderAmount],
+  );
+
   const listHeader = (
     <View>
       <Text style={styles.title}>Wallet</Text>
@@ -313,6 +570,58 @@ export default function WalletScreen() {
         <Pressable style={styles.primaryBtn} onPress={handleTopUp} disabled={loading}>
           {loading ? <ActivityIndicator color={Brand.card} /> : <Text style={styles.primaryText}>Pay with Paystack</Text>}
         </Pressable>
+      </View>
+
+      <View style={styles.autoTopupCard}>
+        <Text style={styles.sectionTitle}>Auto top-up</Text>
+        <Text style={styles.cardCopy}>
+          Top up NGN 10,000 automatically when your balance is NGN 10,000 or below.
+        </Text>
+
+        <View style={styles.autoTopupRow}>
+          <Text style={styles.cardLabel}>Status</Text>
+          <Text style={styles.autoTopupStatus}>{autoTopupStatusLabel}</Text>
+        </View>
+
+        {autoTopupLoading ? <ActivityIndicator color={Brand.navy} /> : null}
+        {autoTopupError ? <Text style={styles.errorText}>{autoTopupError}</Text> : null}
+        {autoTopupNotice ? <Text style={styles.noticeText}>{autoTopupNotice}</Text> : null}
+
+        <Pressable
+          style={[styles.toggleBtn, autoTopupEnabled && styles.toggleBtnActive]}
+          onPress={() => saveAutoTopupSettings(!autoTopupEnabled)}
+          disabled={autoTopupSaving}
+        >
+          {autoTopupSaving ? (
+            <ActivityIndicator color={autoTopupEnabled ? Brand.navy : Brand.card} />
+          ) : (
+            <Text style={[styles.toggleText, autoTopupEnabled && styles.toggleTextActive]}>
+              {autoTopupEnabled ? "Disable auto top-up" : "Enable auto top-up"}
+            </Text>
+          )}
+        </Pressable>
+
+        {autoTopupEnabled && autoTopupSettings.authorization_status !== "active" ? (
+          <Pressable style={styles.secondaryBtn} onPress={startDirectDebitLink} disabled={autoTopupLinking}>
+            {autoTopupLinking ? (
+              <ActivityIndicator color={Brand.navy} />
+            ) : (
+              <Text style={styles.secondaryText}>Link bank account</Text>
+            )}
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View style={styles.autoTopupHistory}>
+        <Text style={styles.sectionTitle}>Auto top-up history</Text>
+        {autoTopupAttemptsLoading ? <ActivityIndicator color={Brand.navy} /> : null}
+        {autoTopupAttemptsError ? <Text style={styles.errorText}>{autoTopupAttemptsError}</Text> : null}
+        {!autoTopupAttemptsLoading && autoTopupAttempts.length === 0 ? (
+          <Text style={styles.emptyText}>No auto top-ups yet.</Text>
+        ) : null}
+        {!autoTopupAttemptsLoading
+          ? autoTopupAttempts.map((item) => renderAutoTopupAttempt(item))
+          : null}
       </View>
 
       <View style={styles.transactionsHeader}>
@@ -372,6 +681,10 @@ const styles = StyleSheet.create({
     color: Brand.muted,
     fontWeight: "600",
   },
+  cardCopy: {
+    color: Brand.muted,
+    marginTop: 6,
+  },
   balanceText: {
     fontSize: 22,
     fontWeight: "800",
@@ -401,8 +714,80 @@ const styles = StyleSheet.create({
     color: Brand.card,
     fontWeight: "700",
   },
+  autoTopupCard: {
+    marginTop: 24,
+    backgroundColor: Brand.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Brand.border,
+    gap: 10,
+  },
+  autoTopupHistory: {
+    marginTop: 24,
+    gap: 12,
+  },
+  autoTopupAttemptCard: {
+    backgroundColor: Brand.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Brand.border,
+    padding: 14,
+    gap: 6,
+  },
+  autoTopupErrorText: {
+    color: Brand.red,
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  autoTopupRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  autoTopupStatus: {
+    color: Brand.navy,
+    fontWeight: "700",
+  },
+  toggleBtn: {
+    backgroundColor: Brand.navy,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 6,
+  },
+  toggleBtnActive: {
+    backgroundColor: Brand.card,
+    borderWidth: 1,
+    borderColor: Brand.navy,
+  },
+  toggleText: {
+    color: Brand.card,
+    fontWeight: "700",
+  },
+  toggleTextActive: {
+    color: Brand.navy,
+  },
+  secondaryBtn: {
+    backgroundColor: Brand.card,
+    borderWidth: 1,
+    borderColor: Brand.navy,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  secondaryText: {
+    color: Brand.navy,
+    fontWeight: "700",
+  },
   errorText: {
     color: "#d15353",
+    fontWeight: "600",
+  },
+  noticeText: {
+    color: Brand.muted,
     fontWeight: "600",
   },
   transactionsHeader: {
@@ -452,4 +837,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
+
+
+
 

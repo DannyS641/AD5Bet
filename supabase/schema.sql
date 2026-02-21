@@ -23,6 +23,39 @@ create table if not exists public.wallet_transactions (
   created_at timestamptz default now()
 );
 
+create table if not exists public.auto_topup_settings (
+  user_id uuid primary key references auth.users on delete cascade,
+  enabled boolean not null default false,
+  threshold numeric not null default 10000,
+  topup_amount numeric not null default 10000,
+  currency text not null default 'NGN',
+  authorization_email text,
+  authorization_reference text,
+  authorization_code text,
+  authorization_status text not null default 'none',
+  authorization_created_at timestamptz,
+  authorization_active_at timestamptz,
+  last_attempt_at timestamptz,
+  last_attempt_status text,
+  last_charge_reference text,
+  cooldown_minutes int not null default 60,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.auto_topup_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users on delete cascade,
+  reference text unique not null,
+  amount numeric not null,
+  currency text not null default 'NGN',
+  provider text not null default 'paystack',
+  status text not null default 'processing',
+  initiated_at timestamptz default now(),
+  completed_at timestamptz,
+  error text
+);
+
 create table if not exists public.withdrawal_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users on delete cascade,
@@ -163,6 +196,71 @@ begin
   end if;
 
   return next_balance;
+end;
+$$;
+
+create or replace function public.upsert_auto_topup_settings(
+  p_enabled boolean,
+  p_threshold numeric,
+  p_topup_amount numeric,
+  p_currency text default 'NGN'
+)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_settings public.auto_topup_settings%rowtype;
+begin
+  v_user_id := auth.uid();
+  if v_user_id is null then
+    raise exception 'Unauthorized';
+  end if;
+
+  if p_threshold is null or p_threshold <= 0 then
+    raise exception 'Invalid threshold';
+  end if;
+
+  if p_topup_amount is null or p_topup_amount <= 0 then
+    raise exception 'Invalid topup amount';
+  end if;
+
+  insert into public.auto_topup_settings (
+    user_id,
+    enabled,
+    threshold,
+    topup_amount,
+    currency,
+    updated_at
+  )
+  values (
+    v_user_id,
+    coalesce(p_enabled, false),
+    p_threshold,
+    p_topup_amount,
+    coalesce(p_currency, 'NGN'),
+    now()
+  )
+  on conflict (user_id) do update
+    set enabled = excluded.enabled,
+        threshold = excluded.threshold,
+        topup_amount = excluded.topup_amount,
+        currency = excluded.currency,
+        updated_at = now()
+  returning * into v_settings;
+
+  return json_build_object(
+    'enabled', v_settings.enabled,
+    'threshold', v_settings.threshold,
+    'topup_amount', v_settings.topup_amount,
+    'currency', v_settings.currency,
+    'authorization_status', v_settings.authorization_status,
+    'authorization_reference', v_settings.authorization_reference,
+    'authorization_active_at', v_settings.authorization_active_at,
+    'last_attempt_status', v_settings.last_attempt_status
+  );
 end;
 $$;
 
@@ -449,6 +547,8 @@ for each row execute procedure public.handle_new_user();
 alter table public.profiles enable row level security;
 alter table public.wallets enable row level security;
 alter table public.wallet_transactions enable row level security;
+alter table public.auto_topup_settings enable row level security;
+alter table public.auto_topup_attempts enable row level security;
 alter table public.withdrawal_requests enable row level security;
 alter table public.jackpots enable row level security;
 alter table public.jackpot_events enable row level security;
@@ -463,6 +563,8 @@ drop policy if exists "Wallets are viewable by owner" on public.wallets;
 drop policy if exists "Wallets can be updated by owner" on public.wallets;
 drop policy if exists "Wallets can be inserted by owner" on public.wallets;
 drop policy if exists "Wallet transactions are viewable by owner" on public.wallet_transactions;
+drop policy if exists "Auto topup settings are viewable by owner" on public.auto_topup_settings;
+drop policy if exists "Auto topup attempts are viewable by owner" on public.auto_topup_attempts;
 drop policy if exists "Withdrawal requests are viewable by owner" on public.withdrawal_requests;
 drop policy if exists "Withdrawal requests can be inserted by owner" on public.withdrawal_requests;
 drop policy if exists "Jackpots are viewable by all" on public.jackpots;
@@ -496,6 +598,14 @@ with check (auth.uid() = user_id);
 
 create policy "Wallet transactions are viewable by owner"
 on public.wallet_transactions for select
+using (auth.uid() = user_id);
+
+create policy "Auto topup settings are viewable by owner"
+on public.auto_topup_settings for select
+using (auth.uid() = user_id);
+
+create policy "Auto topup attempts are viewable by owner"
+on public.auto_topup_attempts for select
 using (auth.uid() = user_id);
 
 create policy "Withdrawal requests are viewable by owner"
@@ -542,3 +652,5 @@ create index if not exists jackpot_events_jackpot_id_idx on public.jackpot_event
 create index if not exists jackpot_entries_jackpot_id_idx on public.jackpot_entries (jackpot_id);
 create index if not exists jackpot_entries_user_id_idx on public.jackpot_entries (user_id);
 create index if not exists withdrawal_requests_user_id_idx on public.withdrawal_requests (user_id);
+create index if not exists auto_topup_attempts_user_id_idx on public.auto_topup_attempts (user_id);
+create index if not exists auto_topup_attempts_status_idx on public.auto_topup_attempts (status);

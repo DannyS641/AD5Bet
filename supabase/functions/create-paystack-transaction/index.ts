@@ -1,7 +1,7 @@
 // Supabase Edge Function: create-paystack-transaction
 // Requires PAYSTACK_SECRET_KEY, SUPABASE_URL, and SUPABASE_ANON_KEY to be set in Supabase secrets.
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "jsr:@supabase/supabase-js@2.49.1";
 
 const PAYSTACK_URL = "https://api.paystack.co/transaction/initialize";
 
