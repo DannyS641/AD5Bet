@@ -1,4 +1,4 @@
--- Core tables for AD5BET
+﻿-- Core tables for AD5BET
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users on delete cascade,
@@ -130,9 +130,57 @@ create table if not exists public.bets (
   total_odds numeric not null,
   potential_win numeric not null,
   selections jsonb not null,
-  status text default 'pending',
+  currency text not null default 'NGN',
+  status text not null default 'pending',
+  result text,
+  payout numeric default 0,
+  is_live boolean not null default false,
+  created_at timestamptz default now(),
+  settled_at timestamptz
+);
+
+create table if not exists public.bet_legs (
+  id uuid primary key default gen_random_uuid(),
+  bet_id uuid references public.bets on delete cascade,
+  user_id uuid references auth.users on delete cascade,
+  selection_id text,
+  event_id text not null,
+  sport_key text,
+  league text,
+  home_team text,
+  away_team text,
+  market text not null,
+  outcome text not null,
+  odds numeric not null,
+  point numeric,
+  commence_time timestamptz,
+  status text not null default 'pending',
+  settled_at timestamptz,
   created_at timestamptz default now()
 );
+
+create table if not exists public.event_results (
+  id uuid primary key default gen_random_uuid(),
+  event_id text unique not null,
+  sport_key text,
+  sport_title text,
+  home_team text,
+  away_team text,
+  commence_time timestamptz,
+  completed boolean default false,
+  home_score int,
+  away_score int,
+  last_update timestamptz,
+  source text not null default 'odds-api',
+  raw jsonb,
+  created_at timestamptz default now()
+);
+
+alter table public.bets add column if not exists currency text not null default 'NGN';
+alter table public.bets add column if not exists result text;
+alter table public.bets add column if not exists payout numeric default 0;
+alter table public.bets add column if not exists is_live boolean not null default false;
+alter table public.bets add column if not exists settled_at timestamptz;
 
 -- Ensure profile & wallet are created for each new user
 create or replace function public.handle_new_user()
@@ -163,6 +211,7 @@ returns numeric
 language plpgsql
 security definer
 set search_path = public
+set row_security = off
 as $$
 declare
   next_balance numeric;
@@ -209,6 +258,7 @@ returns json
 language plpgsql
 security definer
 set search_path = public
+set row_security = off
 as $$
 declare
   v_user_id uuid;
@@ -277,6 +327,7 @@ returns json
 language plpgsql
 security definer
 set search_path = public
+set row_security = off
 as $$
 declare
   v_balance numeric;
@@ -358,6 +409,7 @@ returns json
 language plpgsql
 security definer
 set search_path = public
+set row_security = off
 as $$
 declare
   v_user_id uuid;
@@ -442,6 +494,371 @@ begin
 end;
 $$;
 
+create or replace function public.place_bet(
+  p_user_id uuid,
+  p_stake numeric,
+  p_currency text default 'NGN',
+  p_selections jsonb default '[]'::jsonb
+)
+returns json
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_balance numeric;
+  v_total_odds numeric := 1;
+  v_potential_win numeric := 0;
+  v_bet_id uuid;
+  v_selection jsonb;
+  v_count int;
+  v_now timestamptz := now();
+  v_commence timestamptz;
+  v_odds numeric;
+  v_is_live boolean := false;
+  v_reference text;
+begin
+  if auth.role() <> 'service_role' then
+    raise exception 'Unauthorized';
+  end if;
+
+  if p_user_id is null then
+    raise exception 'Missing user';
+  end if;
+
+  if p_stake is null or p_stake <= 0 then
+    raise exception 'Invalid stake';
+  end if;
+
+  if p_selections is null or jsonb_typeof(p_selections) <> 'array' then
+    raise exception 'Invalid selections';
+  end if;
+
+  select count(*) into v_count from jsonb_array_elements(p_selections);
+  if v_count = 0 then
+    raise exception 'No selections';
+  end if;
+
+  select balance into v_balance
+  from public.wallets
+  where user_id = p_user_id
+  for update;
+
+  if v_balance is null then
+    v_balance := 0;
+  end if;
+
+  if v_balance < p_stake then
+    raise exception 'Insufficient balance';
+  end if;
+
+  for v_selection in select * from jsonb_array_elements(p_selections)
+  loop
+    v_odds := nullif(v_selection->>'odds', '')::numeric;
+    if v_odds is null or v_odds <= 1 then
+      raise exception 'Invalid odds';
+    end if;
+    v_total_odds := v_total_odds * v_odds;
+    v_commence := nullif(v_selection->>'commenceTime', '')::timestamptz;
+    if v_commence is not null and v_commence <= v_now then
+      v_is_live := true;
+    end if;
+  end loop;
+
+  v_total_odds := round(v_total_odds, 2);
+  v_potential_win := round(p_stake * v_total_odds, 2);
+
+  insert into public.bets (
+    user_id,
+    stake,
+    total_odds,
+    potential_win,
+    selections,
+    status,
+    currency,
+    is_live
+  )
+  values (
+    p_user_id,
+    p_stake,
+    v_total_odds,
+    v_potential_win,
+    p_selections,
+    'pending',
+    coalesce(p_currency, 'NGN'),
+    v_is_live
+  )
+  returning id into v_bet_id;
+
+  insert into public.bet_legs (
+    bet_id,
+    user_id,
+    selection_id,
+    event_id,
+    sport_key,
+    league,
+    home_team,
+    away_team,
+    market,
+    outcome,
+    odds,
+    point,
+    commence_time
+  )
+  select
+    v_bet_id,
+    p_user_id,
+    item->>'id',
+    item->>'eventId',
+    item->>'sportKey',
+    item->>'league',
+    item->>'homeTeam',
+    item->>'awayTeam',
+    item->>'market',
+    item->>'outcome',
+    (item->>'odds')::numeric,
+    nullif(item->>'point', '')::numeric,
+    nullif(item->>'commenceTime', '')::timestamptz
+  from jsonb_array_elements(p_selections) as item;
+
+  update public.wallets
+  set balance = v_balance - p_stake,
+      updated_at = now()
+  where user_id = p_user_id;
+
+  v_reference := 'bet-' || v_bet_id::text;
+  insert into public.wallet_transactions (user_id, reference, amount, currency, provider, status)
+  values (p_user_id, v_reference, -p_stake, coalesce(p_currency, 'NGN'), 'bet', 'success')
+  on conflict (reference) do nothing;
+
+  return json_build_object('bet_id', v_bet_id, 'balance', v_balance - p_stake);
+end;
+$$;
+
+create or replace function public.evaluate_bet_leg(
+  p_market text,
+  p_outcome text,
+  p_point numeric,
+  p_home_team text,
+  p_away_team text,
+  p_home_score int,
+  p_away_score int
+)
+returns text
+language plpgsql
+as $$
+declare
+  v_outcome text;
+  v_home_win boolean;
+  v_away_win boolean;
+  v_draw boolean;
+  v_total int;
+begin
+  if p_home_score is null or p_away_score is null then
+    return 'pending';
+  end if;
+
+  v_outcome := lower(coalesce(p_outcome, ''));
+  v_home_win := p_home_score > p_away_score;
+  v_away_win := p_away_score > p_home_score;
+  v_draw := p_home_score = p_away_score;
+  v_total := p_home_score + p_away_score;
+
+  if p_market in ('h2h', 'h2h_3_way') then
+    if v_draw then
+      return case when v_outcome in ('draw', 'x') then 'won' else 'lost' end;
+    elsif v_home_win then
+      return case
+        when v_outcome in ('1', 'home') or v_outcome = lower(coalesce(p_home_team, '')) then 'won'
+        else 'lost'
+      end;
+    else
+      return case
+        when v_outcome in ('2', 'away') or v_outcome = lower(coalesce(p_away_team, '')) then 'won'
+        else 'lost'
+      end;
+    end if;
+  end if;
+
+  if p_market = 'draw_no_bet' then
+    if v_draw then
+      return 'push';
+    elsif v_home_win then
+      return case
+        when v_outcome in ('home') or v_outcome = lower(coalesce(p_home_team, '')) then 'won'
+        else 'lost'
+      end;
+    else
+      return case
+        when v_outcome in ('away') or v_outcome = lower(coalesce(p_away_team, '')) then 'won'
+        else 'lost'
+      end;
+    end if;
+  end if;
+
+  if p_market in ('totals', 'alternate_totals') then
+    if p_point is null then
+      return 'void';
+    end if;
+    if v_total > p_point then
+      return case when v_outcome like 'over %' then 'won' else 'lost' end;
+    elsif v_total < p_point then
+      return case when v_outcome like 'under %' then 'won' else 'lost' end;
+    else
+      return 'push';
+    end if;
+  end if;
+
+  if p_market = 'btts' then
+    if p_home_score > 0 and p_away_score > 0 then
+      return case when v_outcome in ('yes', 'y') then 'won' else 'lost' end;
+    else
+      return case when v_outcome in ('no', 'n') then 'won' else 'lost' end;
+    end if;
+  end if;
+
+  if p_market = 'spreads' then
+    if p_point is null then
+      return 'void';
+    end if;
+    if v_outcome in ('home') or v_outcome = lower(coalesce(p_home_team, '')) then
+      if (p_home_score + p_point) > p_away_score then
+        return 'won';
+      elsif (p_home_score + p_point) < p_away_score then
+        return 'lost';
+      else
+        return 'push';
+      end if;
+    elsif v_outcome in ('away') or v_outcome = lower(coalesce(p_away_team, '')) then
+      if (p_away_score + p_point) > p_home_score then
+        return 'won';
+      elsif (p_away_score + p_point) < p_home_score then
+        return 'lost';
+      else
+        return 'push';
+      end if;
+    end if;
+  end if;
+
+  return 'void';
+end;
+$$;
+
+create or replace function public.settle_open_bets(
+  p_event_ids text[] default null
+)
+returns json
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_role text;
+  v_updated_legs int := 0;
+  v_settled_bets int := 0;
+  v_now timestamptz := now();
+  v_bet record;
+  v_lost int;
+  v_pending int;
+  v_won int;
+  v_void int;
+  v_win_odds numeric;
+  v_payout numeric;
+  v_updated int;
+  v_tx_id uuid;
+  v_reference text;
+begin
+  v_role := auth.role();
+  if v_role <> 'service_role' then
+    raise exception 'Unauthorized';
+  end if;
+
+  update public.bet_legs l
+  set status = public.evaluate_bet_leg(
+        l.market,
+        l.outcome,
+        l.point,
+        l.home_team,
+        l.away_team,
+        r.home_score,
+        r.away_score
+      ),
+      settled_at = v_now
+  from public.event_results r
+  where l.status = 'pending'
+    and r.event_id = l.event_id
+    and r.completed = true
+    and (p_event_ids is null or l.event_id = any(p_event_ids));
+
+  get diagnostics v_updated_legs = row_count;
+
+  for v_bet in
+    select b.id, b.user_id, b.stake, b.currency
+    from public.bets b
+    where b.status in ('pending', 'open')
+      and not exists (
+        select 1 from public.bet_legs l
+        where l.bet_id = b.id and l.status = 'pending'
+      )
+  loop
+    select
+      sum(case when status = 'lost' then 1 else 0 end),
+      sum(case when status = 'pending' then 1 else 0 end),
+      sum(case when status = 'won' then 1 else 0 end),
+      sum(case when status in ('void', 'push') then 1 else 0 end),
+      exp(sum(ln(case when status = 'won' then odds else 1 end)))::numeric
+    into v_lost, v_pending, v_won, v_void, v_win_odds
+    from public.bet_legs
+    where bet_id = v_bet.id;
+
+    v_lost := coalesce(v_lost, 0);
+    v_won := coalesce(v_won, 0);
+    v_void := coalesce(v_void, 0);
+    v_win_odds := coalesce(v_win_odds, 1);
+
+    if v_lost > 0 then
+      v_payout := 0;
+      update public.bets
+      set status = 'lost', result = 'lost', payout = v_payout, settled_at = v_now
+      where id = v_bet.id and status in ('pending', 'open');
+    elsif v_won = 0 and v_void > 0 then
+      v_payout := v_bet.stake;
+      update public.bets
+      set status = 'void', result = 'void', payout = v_payout, settled_at = v_now
+      where id = v_bet.id and status in ('pending', 'open');
+    else
+      v_payout := round(v_bet.stake * v_win_odds, 2);
+      update public.bets
+      set status = 'won', result = 'won', payout = v_payout, settled_at = v_now
+      where id = v_bet.id and status in ('pending', 'open');
+    end if;
+
+    get diagnostics v_updated = row_count;
+
+    if v_updated > 0 and v_payout > 0 then
+      v_reference := 'bet-payout-' || v_bet.id::text;
+      insert into public.wallet_transactions (user_id, reference, amount, currency, provider, status)
+      values (v_bet.user_id, v_reference, v_payout, coalesce(v_bet.currency, 'NGN'), 'bet', 'success')
+      on conflict (reference) do nothing
+      returning id into v_tx_id;
+
+      if v_tx_id is not null then
+        update public.wallets
+        set balance = coalesce(balance, 0) + v_payout,
+            updated_at = now()
+        where user_id = v_bet.user_id;
+      end if;
+    end if;
+
+    v_settled_bets := v_settled_bets + 1;
+  end loop;
+
+  return json_build_object('updated_legs', v_updated_legs, 'settled_bets', v_settled_bets);
+end;
+$$;
+
 create or replace function public.settle_jackpot(
   p_jackpot_id uuid,
   p_results jsonb
@@ -450,6 +867,7 @@ returns json
 language plpgsql
 security definer
 set search_path = public
+set row_security = off
 as $$
 declare
   v_role text;
@@ -556,6 +974,8 @@ alter table public.jackpot_entries enable row level security;
 alter table public.jackpot_results enable row level security;
 alter table public.jackpot_payouts enable row level security;
 alter table public.bets enable row level security;
+alter table public.bet_legs enable row level security;
+alter table public.event_results enable row level security;
 
 drop policy if exists "Profiles are viewable by owner" on public.profiles;
 drop policy if exists "Profiles can be updated by owner" on public.profiles;
@@ -563,6 +983,7 @@ drop policy if exists "Wallets are viewable by owner" on public.wallets;
 drop policy if exists "Wallets can be updated by owner" on public.wallets;
 drop policy if exists "Wallets can be inserted by owner" on public.wallets;
 drop policy if exists "Wallet transactions are viewable by owner" on public.wallet_transactions;
+drop policy if exists "Wallet transactions can be inserted by service role" on public.wallet_transactions;
 drop policy if exists "Auto topup settings are viewable by owner" on public.auto_topup_settings;
 drop policy if exists "Auto topup attempts are viewable by owner" on public.auto_topup_attempts;
 drop policy if exists "Withdrawal requests are viewable by owner" on public.withdrawal_requests;
@@ -575,6 +996,12 @@ drop policy if exists "Jackpot entries can be inserted by owner" on public.jackp
 drop policy if exists "Jackpot payouts are viewable by owner" on public.jackpot_payouts;
 drop policy if exists "Bets are viewable by owner" on public.bets;
 drop policy if exists "Bets can be inserted by owner" on public.bets;
+drop policy if exists "Bets can be inserted by service role" on public.bets;
+drop policy if exists "Bets can be updated by service role" on public.bets;
+drop policy if exists "Bet legs are viewable by owner" on public.bet_legs;
+drop policy if exists "Bet legs can be inserted by service role" on public.bet_legs;
+drop policy if exists "Bet legs can be updated by service role" on public.bet_legs;
+drop policy if exists "Event results are viewable by all" on public.event_results;
 
 create policy "Profiles are viewable by owner"
 on public.profiles for select
@@ -588,17 +1015,21 @@ create policy "Wallets are viewable by owner"
 on public.wallets for select
 using (auth.uid() = user_id);
 
-create policy "Wallets can be updated by owner"
-on public.wallets for update
-using (auth.uid() = user_id);
-
 create policy "Wallets can be inserted by owner"
 on public.wallets for insert
 with check (auth.uid() = user_id);
 
+create policy "Wallets can be updated by service role"
+on public.wallets for update
+using (auth.role() = 'service_role');
+
 create policy "Wallet transactions are viewable by owner"
 on public.wallet_transactions for select
 using (auth.uid() = user_id);
+
+create policy "Wallet transactions can be inserted by service role"
+on public.wallet_transactions for insert
+with check (auth.role() = 'service_role');
 
 create policy "Auto topup settings are viewable by owner"
 on public.auto_topup_settings for select
@@ -644,9 +1075,29 @@ create policy "Bets are viewable by owner"
 on public.bets for select
 using (auth.uid() = user_id);
 
-create policy "Bets can be inserted by owner"
+create policy "Bets can be inserted by service role"
 on public.bets for insert
-with check (auth.uid() = user_id);
+with check (auth.role() = 'service_role');
+
+create policy "Bets can be updated by service role"
+on public.bets for update
+using (auth.role() = 'service_role');
+
+create policy "Bet legs are viewable by owner"
+on public.bet_legs for select
+using (auth.uid() = user_id);
+
+create policy "Bet legs can be inserted by service role"
+on public.bet_legs for insert
+with check (auth.role() = 'service_role');
+
+create policy "Bet legs can be updated by service role"
+on public.bet_legs for update
+using (auth.role() = 'service_role');
+
+create policy "Event results are viewable by all"
+on public.event_results for select
+using (true);
 
 create index if not exists jackpot_events_jackpot_id_idx on public.jackpot_events (jackpot_id);
 create index if not exists jackpot_entries_jackpot_id_idx on public.jackpot_entries (jackpot_id);
@@ -654,3 +1105,10 @@ create index if not exists jackpot_entries_user_id_idx on public.jackpot_entries
 create index if not exists withdrawal_requests_user_id_idx on public.withdrawal_requests (user_id);
 create index if not exists auto_topup_attempts_user_id_idx on public.auto_topup_attempts (user_id);
 create index if not exists auto_topup_attempts_status_idx on public.auto_topup_attempts (status);
+create index if not exists bets_user_id_idx on public.bets (user_id);
+create index if not exists bets_status_idx on public.bets (status);
+create index if not exists bet_legs_bet_id_idx on public.bet_legs (bet_id);
+create index if not exists bet_legs_event_id_idx on public.bet_legs (event_id);
+create index if not exists bet_legs_user_id_idx on public.bet_legs (user_id);
+create index if not exists event_results_event_id_idx on public.event_results (event_id);
+

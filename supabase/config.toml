@@ -18,3 +18,9 @@ verify_jwt = false
 
 [functions."auto-topup-check"]
 verify_jwt = false
+
+[functions."odds-scores-sync"]
+verify_jwt = false
+
+[functions."place-bet"]
+verify_jwt = false

@@ -13,13 +13,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
 import { useBetSlip } from "@/context/BetSlipContext";
-import { OddsEvent, fetchFeaturedOdds } from "@/lib/odds-api";
+import { OddsEvent, OddsScoreEvent, fetchFeaturedOdds, fetchLiveScores } from "@/lib/odds-api";
 import { BetSlipFab } from "@/components/BetSlipFab";
 
 export default function LiveScreen() {
   const { addSelection } = useBetSlip();
   const insets = useSafeAreaInsets();
   const [liveMatches, setLiveMatches] = useState<OddsEvent[]>([]);
+  const [liveScores, setLiveScores] = useState<Map<string, OddsScoreEvent>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -27,9 +28,14 @@ export default function LiveScreen() {
   const loadLive = useCallback(async () => {
     try {
       setLoading(true);
-      const events = await fetchFeaturedOdds("soccer_epl");
+      const [events, scores] = await Promise.all([
+        fetchFeaturedOdds("soccer_epl"),
+        fetchLiveScores("soccer_epl", 1),
+      ]);
       const live = events.filter((event) => new Date(event.commenceTime).getTime() <= Date.now());
       setLiveMatches(live);
+      const scoreMap = new Map(scores.map((item) => [item.id, item]));
+      setLiveScores(scoreMap);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load live matches.");
@@ -73,11 +79,19 @@ export default function LiveScreen() {
         ) : null}
         {liveMatches.map((match) => {
           const h2hMarket = match.markets.find((market) => market.key === "h2h");
+          const score = liveScores.get(match.id);
+          const scoreMap = new Map(
+            (score?.scores ?? []).map((item) => [item.name?.toLowerCase(), item.score ?? "0"])
+          );
+          const homeScore = scoreMap.get(match.homeTeam.toLowerCase()) ?? "-";
+          const awayScore = scoreMap.get(match.awayTeam.toLowerCase()) ?? "-";
           return (
             <View key={match.id} style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.league}>{match.sportTitle}</Text>
-                <Text style={styles.minute}>Live</Text>
+                <Text style={styles.minute}>
+                  {score ? `${homeScore} - ${awayScore}` : "Live"}
+                </Text>
               </View>
               <Text style={styles.teams}>
                 {match.homeTeam} vs {match.awayTeam}
@@ -93,11 +107,14 @@ export default function LiveScreen() {
                         eventId: match.id,
                         sportKey: match.sportKey,
                         league: match.sportTitle,
+                        homeTeam: match.homeTeam,
+                        awayTeam: match.awayTeam,
                         match: `${match.homeTeam} vs ${match.awayTeam}`,
                         market: "h2h",
                         outcome: outcome.name,
                         odds: outcome.price,
                         commenceTime: match.commenceTime,
+                        point: outcome.point ?? null,
                       })
                     }
                   >

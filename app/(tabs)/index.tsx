@@ -247,11 +247,14 @@ export default function HomeScreen() {
             eventId: match.id,
             sportKey: match.sportKey,
             league: match.sportTitle,
+            homeTeam: match.homeTeam,
+            awayTeam: match.awayTeam,
             match: `${match.homeTeam} vs ${match.awayTeam}`,
             market: marketKey,
             outcome: label,
             odds: outcome.price,
             commenceTime: match.commenceTime,
+            point: outcome.point ?? null,
           })
         }
         disabled={!outcome}

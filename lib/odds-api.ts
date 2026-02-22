@@ -11,6 +11,23 @@ export type OddsMarket = {
   outcomes: OddsMarketOutcome[];
 };
 
+export type OddsScore = {
+  name: string;
+  score: string | null;
+};
+
+export type OddsScoreEvent = {
+  id: string;
+  sportKey: string;
+  sportTitle: string;
+  commenceTime: string;
+  homeTeam: string;
+  awayTeam: string;
+  completed: boolean;
+  lastUpdate?: string | null;
+  scores: OddsScore[] | null;
+};
+
 export type OddsEvent = {
   id: string;
   sportKey: string;
@@ -56,6 +73,9 @@ type OddsApiEvent = {
   home_team: string;
   away_team: string;
   bookmakers?: OddsApiBookmaker[];
+  completed?: boolean;
+  last_update?: string;
+  scores?: OddsScore[];
 };
 
 const DEFAULT_REGIONS = "eu";
@@ -114,4 +134,23 @@ export async function fetchEventMarkets(eventId: string, sportKey: string) {
     awayTeam: event.away_team,
     markets: pickMarkets(event.bookmakers),
   };
+}
+
+export async function fetchLiveScores(sportKey = "soccer_epl", daysFrom = 1) {
+  const data = await oddsApiFetch<OddsApiEvent[]>(`/sports/${sportKey}/scores`, {
+    daysFrom: String(daysFrom),
+    dateFormat: DEFAULT_DATE_FORMAT,
+  });
+
+  return data.map((event) => ({
+    id: event.id,
+    sportKey: event.sport_key,
+    sportTitle: event.sport_title,
+    commenceTime: event.commence_time,
+    homeTeam: event.home_team,
+    awayTeam: event.away_team,
+    completed: Boolean(event.completed ?? false),
+    lastUpdate: event.last_update ?? null,
+    scores: event.scores ?? null,
+  }));
 }

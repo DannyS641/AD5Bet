@@ -137,11 +137,14 @@ export default function MarketsScreen() {
                         eventId: event.id,
                         sportKey: event.sportKey,
                         league: event.sportTitle,
+                        homeTeam: event.homeTeam,
+                        awayTeam: event.awayTeam,
                         match: `${event.homeTeam} vs ${event.awayTeam}`,
                         market: market.key,
                         outcome: label,
                         odds: outcome.price,
                         commenceTime: event.commenceTime,
+                        point: outcome.point ?? null,
                       })
                     }
                   >

@@ -17,15 +17,30 @@ import { Brand } from "@/constants/brand";
 import { BetSelection, useBetSlip } from "@/context/BetSlipContext";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { Config } from "@/lib/config";
 
 type PlacedBet = {
   id: string;
   stake: number;
   total_odds: number;
   potential_win: number;
+  payout?: number | null;
+  result?: string | null;
   selections: BetSelection[] | null;
   status: string | null;
   created_at: string | null;
+  legs?: BetLeg[];
+};
+
+type BetLeg = {
+  bet_id: string;
+  event_id: string;
+  market: string;
+  outcome: string;
+  odds: number;
+  point: number | null;
+  match_label: string | null;
+  status: string | null;
 };
 
 export default function BetSlipScreen() {
@@ -72,7 +87,7 @@ export default function BetSlipScreen() {
     setPlacedError(null);
     const { data, error: betsError } = await supabase
       .from("bets")
-      .select("id, stake, total_odds, potential_win, selections, status, created_at")
+      .select("id, stake, total_odds, potential_win, selections, status, created_at, payout, result")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -80,7 +95,50 @@ export default function BetSlipScreen() {
     if (betsError) {
       setPlacedError(betsError.message);
     }
-    setPlacedBets(data ?? []);
+    const bets = (data ?? []) as PlacedBet[];
+
+    if (bets.length === 0) {
+      setPlacedBets([]);
+      setPlacedLoading(false);
+      return;
+    }
+
+    const betIds = bets.map((bet) => bet.id);
+    const { data: legsData } = await supabase
+      .from("bet_legs")
+      .select(
+        "bet_id, event_id, market, outcome, odds, point, status, home_team, away_team"
+      )
+      .in("bet_id", betIds);
+
+    const legs = (legsData ?? []) as Array<
+      Omit<BetLeg, "match_label"> & { home_team?: string | null; away_team?: string | null }
+    >;
+    const legsByBet = new Map<string, BetLeg[]>();
+    legs.forEach((leg) => {
+      const matchLabel =
+        leg.home_team && leg.away_team ? `${leg.home_team} vs ${leg.away_team}` : null;
+      const enriched: BetLeg = {
+        bet_id: leg.bet_id,
+        event_id: leg.event_id,
+        market: leg.market,
+        outcome: leg.outcome,
+        odds: leg.odds,
+        point: leg.point ?? null,
+        status: leg.status ?? null,
+        match_label: matchLabel,
+      };
+      const current = legsByBet.get(leg.bet_id) ?? [];
+      current.push(enriched);
+      legsByBet.set(leg.bet_id, current);
+    });
+
+    const withLegs = bets.map((bet) => ({
+      ...bet,
+      legs: legsByBet.get(bet.id) ?? [],
+    }));
+
+    setPlacedBets(withLegs);
     setPlacedLoading(false);
   }, [user]);
 
@@ -113,47 +171,54 @@ export default function BetSlipScreen() {
     setLoading(true);
     setError(null);
 
-    const { data: wallet } = await supabase.from("wallets").select("balance").eq("user_id", user.id).single();
-    const balance = wallet?.balance ?? 0;
-
-    if (balance < stakeValue) {
-      setError("Insufficient wallet balance.");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      setError("Please sign in again.");
       setLoading(false);
       return;
     }
 
-    const nextBalance = balance - stakeValue;
-    const { error: walletError } = await supabase
-      .from("wallets")
-      .upsert({ user_id: user.id, balance: nextBalance }, { onConflict: "user_id" });
+    const response = await fetch(`${Config.supabaseUrl}/functions/v1/place-bet`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        stake: stakeValue,
+        currency: "NGN",
+        selections,
+        allowLive: true,
+        cutoffMinutes: 2,
+        priceTolerance: 0.02,
+      }),
+    });
 
-    if (walletError) {
-      setError(walletError.message);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const code = payload?.code;
+      if (code === "event_not_found") {
+        setError("Odds updated. Please refresh matches and re-add your selection.");
+      } else if (code === "live_not_supported") {
+        setError("Live betting is not available. Please choose a pre-match game.");
+      } else if (code === "price_changed") {
+        setError("Odds changed. Please refresh and try again.");
+      } else {
+        setError(payload?.error ?? "Unable to place bet.");
+      }
       setLoading(false);
       return;
     }
 
-    const { data: newBet, error: betError } = await supabase.from("bets").insert({
-      user_id: user.id,
-      stake: stakeValue,
-      total_odds: totalOdds,
-      potential_win: potentialWin,
-      selections,
-      status: "pending",
-    }).select("id, stake, total_odds, potential_win, selections, status, created_at").single();
-
-    if (betError) {
-      setError(betError.message);
+    if (!payload?.bet_id) {
+      setError(payload?.error ?? "Unable to place bet.");
       setLoading(false);
       return;
     }
 
     clearSelections();
-    if (newBet) {
-      setPlacedBets((current) => [newBet as PlacedBet, ...current]);
-    } else {
-      await loadPlacedBets();
-    }
+    await loadPlacedBets();
     setLoading(false);
   };
 
@@ -282,14 +347,47 @@ export default function BetSlipScreen() {
                   <Text style={styles.betCount}>{selectionsList.length} picks</Text>
                   {isExpanded ? (
                     <View style={styles.betDetails}>
-                      {selectionsList.map((item: any) => (
-                        <View key={item.id ?? `${item.eventId}-${item.market}-${item.outcome}`} style={styles.betPick}>
-                          <Text style={styles.betPickMatch}>{item.match}</Text>
-                          <Text style={styles.betPickOutcome}>
-                            {String(item.market ?? "").toUpperCase()} | {item.outcome} | {item.odds}
-                          </Text>
-                        </View>
-                      ))}
+                      {(bet.legs && bet.legs.length > 0
+                        ? bet.legs
+                        : selectionsList.map((item: any) => ({
+                            bet_id: bet.id,
+                            event_id: item.eventId ?? "",
+                            market: item.market ?? "",
+                            outcome: item.outcome ?? "",
+                            odds: item.odds ?? 0,
+                            point: item.point ?? null,
+                            status: "pending",
+                            match_label: item.match ?? null,
+                          })))
+                        .map((item: BetLeg) => {
+                          const statusLabel = String(item.status ?? "pending").toUpperCase();
+                          const statusColor =
+                            statusLabel === "WON"
+                              ? Brand.green
+                              : statusLabel === "LOST"
+                                ? Brand.red
+                                : statusLabel === "PUSH" || statusLabel === "VOID"
+                                  ? Brand.gold
+                                  : Brand.muted;
+                          return (
+                            <View
+                              key={`${bet.id}-${item.event_id}-${item.market}-${item.outcome}`}
+                              style={styles.betPick}
+                            >
+                              <View style={styles.betPickHeader}>
+                                <Text style={styles.betPickMatch}>
+                                  {item.match_label ?? "Match"}
+                                </Text>
+                                <Text style={[styles.betPickStatus, { color: statusColor }]}>
+                                  {statusLabel}
+                                </Text>
+                              </View>
+                              <Text style={styles.betPickOutcome}>
+                                {String(item.market ?? "").toUpperCase()} | {item.outcome} | {item.odds}
+                              </Text>
+                            </View>
+                          );
+                        })}
                     </View>
                   ) : null}
                 </View>
@@ -523,9 +621,20 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     gap: 4,
   },
+  betPickHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
   betPickMatch: {
     color: Brand.text,
     fontWeight: "700",
+  },
+  betPickStatus: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.4,
   },
   betPickOutcome: {
     color: Brand.muted,

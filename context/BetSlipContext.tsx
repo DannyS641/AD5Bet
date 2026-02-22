@@ -5,11 +5,14 @@ export type BetSelection = {
   eventId: string;
   sportKey: string;
   league: string;
+  homeTeam: string;
+  awayTeam: string;
   match: string;
   market: string;
   outcome: string;
   odds: number;
   commenceTime: string;
+  point?: number | null;
 };
 
 type BetSlipContextValue = {
