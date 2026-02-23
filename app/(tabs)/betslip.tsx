@@ -41,6 +41,7 @@ type BetLeg = {
   point: number | null;
   match_label: string | null;
   status: string | null;
+  commence_time?: string | null;
 };
 
 export default function BetSlipScreen() {
@@ -60,6 +61,66 @@ export default function BetSlipScreen() {
   const toggleExpanded = useCallback((betId: string) => {
     setExpandedBets((current) => ({ ...current, [betId]: !current[betId] }));
   }, []);
+
+  const formatDateLabel = useCallback((value?: string | null) => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  }, []);
+
+  const getKickoffLabel = useCallback(
+    (bet: PlacedBet) => {
+      const legs = bet.legs ?? [];
+      const times = legs
+        .map((leg) => (leg.commence_time ? new Date(leg.commence_time).getTime() : null))
+        .filter((value): value is number => typeof value === "number" && !Number.isNaN(value));
+      if (times.length === 0) {
+        const selectionsList = Array.isArray(bet.selections) ? bet.selections : [];
+        const fallbackTimes = selectionsList
+          .map((item) => (item.commenceTime ? new Date(item.commenceTime).getTime() : null))
+          .filter((value): value is number => typeof value === "number" && !Number.isNaN(value));
+        if (fallbackTimes.length === 0) return null;
+        times.push(...fallbackTimes);
+      }
+      const earliest = Math.min(...times);
+      return new Date(earliest).toLocaleString(undefined, {
+        weekday: "short",
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    },
+    [],
+  );
+
+  const groupBetsByDate = useCallback(
+    (bets: PlacedBet[]) => {
+      const map = new Map<string, { label: string; items: PlacedBet[] }>();
+      bets.forEach((bet) => {
+        const createdAt = bet.created_at ? new Date(bet.created_at) : null;
+        const key = createdAt && !Number.isNaN(createdAt.getTime())
+          ? createdAt.toISOString().slice(0, 10)
+          : "unknown";
+        const label =
+          key === "unknown" ? "Unknown date" : formatDateLabel(createdAt.toISOString()) ?? "Unknown date";
+        if (!map.has(key)) {
+          map.set(key, { label, items: [] });
+        }
+        map.get(key)?.items.push(bet);
+      });
+      return Array.from(map.entries())
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([dateKey, value]) => ({ dateKey, label: value.label, items: value.items }));
+    },
+    [formatDateLabel],
+  );
 
   const [openBets, settledBets] = useMemo(() => {
     const open: PlacedBet[] = [];
@@ -107,7 +168,7 @@ export default function BetSlipScreen() {
     const { data: legsData } = await supabase
       .from("bet_legs")
       .select(
-        "bet_id, event_id, market, outcome, odds, point, status, home_team, away_team"
+        "bet_id, event_id, market, outcome, odds, point, status, home_team, away_team, commence_time"
       )
       .in("bet_id", betIds);
 
@@ -127,6 +188,7 @@ export default function BetSlipScreen() {
         point: leg.point ?? null,
         status: leg.status ?? null,
         match_label: matchLabel,
+        commence_time: leg.commence_time ?? null,
       };
       const current = legsByBet.get(leg.bet_id) ?? [];
       current.push(enriched);
@@ -204,6 +266,10 @@ export default function BetSlipScreen() {
         setError("Live betting is not available. Please choose a pre-match game.");
       } else if (code === "price_changed") {
         setError("Odds changed. Please refresh and try again.");
+      } else if (code === "markets_not_supported") {
+        setError("Selected market is not available right now. Please choose a different market.");
+      } else if (code === "market_not_supported") {
+        setError("Selected market is not supported for this match. Please choose another market.");
       } else {
         setError(payload?.error ?? "Unable to place bet.");
       }
@@ -322,10 +388,14 @@ export default function BetSlipScreen() {
               {historyTab === "open" ? "No open bets yet." : "No settled bets yet."}
             </Text>
           ) : (
-            (historyTab === "open" ? openBets : settledBets).map((bet) => {
-              const selectionsList = Array.isArray(bet.selections) ? bet.selections : [];
-              const isExpanded = Boolean(expandedBets[bet.id]);
-              return (
+            groupBetsByDate(historyTab === "open" ? openBets : settledBets).map((group) => (
+              <View key={group.dateKey} style={styles.betGroup}>
+                <Text style={styles.betGroupTitle}>{group.label}</Text>
+                {group.items.map((bet) => {
+                  const selectionsList = Array.isArray(bet.selections) ? bet.selections : [];
+                  const isExpanded = Boolean(expandedBets[bet.id]);
+                  const kickoffLabel = getKickoffLabel(bet);
+                  return (
                 <View key={bet.id} style={styles.betCard}>
                   <Pressable style={styles.betHeader} onPress={() => toggleExpanded(bet.id)}>
                     <Text style={styles.betStatus}>{String(bet.status ?? "").toUpperCase()}</Text>
@@ -344,6 +414,9 @@ export default function BetSlipScreen() {
                     Stake: NGN {Number(bet.stake ?? 0).toLocaleString()} | Odds: {bet.total_odds} | Win: NGN{" "}
                     {Number(bet.potential_win ?? 0).toLocaleString()}
                   </Text>
+                  {kickoffLabel ? (
+                    <Text style={styles.betKickoff}>Kickoff: {kickoffLabel}</Text>
+                  ) : null}
                   <Text style={styles.betCount}>{selectionsList.length} picks</Text>
                   {isExpanded ? (
                     <View style={styles.betDetails}>
@@ -392,7 +465,9 @@ export default function BetSlipScreen() {
                   ) : null}
                 </View>
               );
-            })
+                })}
+              </View>
+            ))
           )}
         </View>
       </ScrollView>
@@ -585,6 +660,16 @@ const styles = StyleSheet.create({
     borderColor: Brand.border,
     gap: 8,
   },
+  betGroup: {
+    gap: 10,
+  },
+  betGroupTitle: {
+    color: Brand.muted,
+    fontWeight: "700",
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
   betHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -606,6 +691,10 @@ const styles = StyleSheet.create({
   },
   betMeta: {
     color: Brand.text,
+    fontWeight: "600",
+  },
+  betKickoff: {
+    color: Brand.muted,
     fontWeight: "600",
   },
   betCount: {

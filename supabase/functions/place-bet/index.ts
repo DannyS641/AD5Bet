@@ -99,11 +99,11 @@ const matchOutcome = (selection: BetSelection, event: OddsEvent, market: OddsMar
   return market.outcomes.find((outcome) => normalize(outcome.name) === normalizedOutcome);
 };
 
-const fetchSportOdds = async (sportKey: string) => {
+const fetchSportOdds = async (sportKey: string, markets: string) => {
   const url = new URL(`${ODDS_API_BASE}/sports/${sportKey}/odds`);
   url.searchParams.set("apiKey", oddsApiKey);
   url.searchParams.set("regions", "eu");
-  url.searchParams.set("markets", DEFAULT_MARKETS);
+  url.searchParams.set("markets", markets);
   url.searchParams.set("oddsFormat", "decimal");
   url.searchParams.set("dateFormat", "iso");
 
@@ -158,6 +158,29 @@ const findFallbackEvent = (selection: BetSelection, events: OddsEvent[]) => {
       return Math.abs(eventTime - targetTime) <= 2 * 60 * 60 * 1000;
     }) ?? null
   );
+};
+
+const buildRequestedMarkets = (selections: BetSelection[]) => {
+  const markets = new Set<string>();
+  selections.forEach((selection) => {
+    if (!selection.market) return;
+    if (selection.market === "alternate_totals") {
+      markets.add("totals");
+      return;
+    }
+    markets.add(selection.market);
+  });
+  return Array.from(markets);
+};
+
+const parseUnsupportedMarkets = (message: string) => {
+  const marker = "Markets not supported by this endpoint:";
+  if (!message.includes(marker)) return [];
+  const list = message.split(marker)[1] ?? "";
+  return list
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 };
 
 Deno.serve(async (req: Request) => {
@@ -233,7 +256,29 @@ Deno.serve(async (req: Request) => {
       new Set(selections.map((selection) => selection.sportKey).filter(Boolean))
     );
     for (const sportKey of sportKeys) {
-      const result = await fetchSportOdds(sportKey);
+      const requestedMarkets = buildRequestedMarkets(
+        selections.filter((selection) => selection.sportKey === sportKey)
+      );
+      const marketParam = requestedMarkets.length > 0 ? requestedMarkets.join(",") : DEFAULT_MARKETS;
+      let result = await fetchSportOdds(sportKey, marketParam);
+      if ("error" in result) {
+        const unsupported = parseUnsupportedMarkets(String(result.error));
+        if (unsupported.length > 0) {
+          const allowed = requestedMarkets.filter((market) => !unsupported.includes(market));
+          if (allowed.length === 0) {
+            return new Response(
+              JSON.stringify({
+                error: `Markets not supported: ${unsupported.join(", ")}`,
+                code: "markets_not_supported",
+                sportKey,
+              }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+          const fallbackParam = allowed.join(",");
+          result = await fetchSportOdds(sportKey, fallbackParam);
+        }
+      }
       if ("error" in result) {
         return new Response(JSON.stringify({ error: result.error, sportKey }), {
           status: 400,
@@ -295,12 +340,24 @@ Deno.serve(async (req: Request) => {
       }
 
       const markets = event.bookmakers?.[0]?.markets ?? [];
-      const market = markets.find((m) => m.key === selection.market);
+      const market =
+        markets.find((m) => m.key === selection.market) ??
+        (selection.market === "alternate_totals"
+          ? markets.find((m) => m.key === "totals")
+          : null);
       if (!market) {
-        return new Response(JSON.stringify({ error: "Market not available", eventId: selection.eventId }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            error: "Market not available",
+            code: "market_not_supported",
+            eventId: selection.eventId,
+            market: selection.market,
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
       }
 
       const outcome = matchOutcome(selection, event, market);

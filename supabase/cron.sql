@@ -12,8 +12,8 @@ returns void
 language plpgsql
 as $$
 declare
-  functions_url text := current_setting('https://wlqsqgrpclqguwfdcbmq.functions.supabase.co', true);
-  service_role_key text := current_setting('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndscXNxZ3JwY2xxZ3V3ZmRjYm1xIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDU4ODM5OCwiZXhwIjoyMDg2MTY0Mzk4fQ.sm99s1WXLvlsUla7g3v4gj52O4qtQmRndukYYYxPzAg', true);
+  functions_url text := current_setting('app.settings.functions_url', true);
+  service_role_key text := current_setting('app.settings.service_role_key', true);
 begin
   if functions_url is null or service_role_key is null then
     raise exception 'Missing app.settings.functions_url or app.settings.service_role_key';
