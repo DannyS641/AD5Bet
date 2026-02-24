@@ -131,6 +131,7 @@ Deno.serve(async (req: Request) => {
           authorization_email: email,
           authorization_reference: reference,
           authorization_status: "pending",
+          authorization_code: null,
           authorization_created_at: now,
           updated_at: now,
         },

@@ -42,6 +42,14 @@ function formatMatchTime(iso: string) {
   });
 }
 
+function formatLiveMinute(iso: string) {
+  const commenceMs = new Date(iso).getTime();
+  if (Number.isNaN(commenceMs)) return null;
+  const diffMinutes = Math.floor((Date.now() - commenceMs) / 60000);
+  if (diffMinutes <= 0) return "Live";
+  return `${diffMinutes}'`;
+}
+
 function mergeMarkets(primary: OddsMarket[], extra: OddsMarket[]) {
   const map = new Map(primary.map((market) => [market.key, market]));
   extra.forEach((market) => {
@@ -347,7 +355,9 @@ export default function HomeScreen() {
                 <Text style={styles.liveText}>LIVE</Text>
               </View>
             ) : null}
-            <Text style={styles.timeText}>{formatMatchTime(match.commenceTime)}</Text>
+            <Text style={styles.timeText}>
+              {options?.live ? formatLiveMinute(match.commenceTime) ?? "Live" : formatMatchTime(match.commenceTime)}
+            </Text>
           </View>
           <View style={styles.teamsCol}>
             <Text style={styles.teamText} numberOfLines={1}>

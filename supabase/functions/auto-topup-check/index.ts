@@ -4,6 +4,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2.49.1";
 
 const PAYSTACK_CHARGE_URL = "https://api.paystack.co/transaction/charge_authorization";
+const PAYSTACK_VERIFY_AUTH_URL = "https://api.paystack.co/customer/authorization/verify";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -80,7 +81,7 @@ Deno.serve(async (req: Request) => {
     const { data: settings, error: settingsError } = await getAdminClient()
       .from("auto_topup_settings")
       .select(
-        "enabled, threshold, topup_amount, currency, authorization_status, authorization_code, authorization_email, last_attempt_at, cooldown_minutes",
+        "enabled, threshold, topup_amount, currency, authorization_status, authorization_code, authorization_reference, authorization_email, authorization_active_at, authorization_created_at, last_attempt_at, cooldown_minutes",
       )
       .eq("user_id", userId)
       .maybeSingle();
@@ -104,10 +105,77 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    if (settings.authorization_status !== "active" || !settings.authorization_code) {
-      return new Response(JSON.stringify({ status: "needs_mandate" }), {
+    const nowIso = new Date().toISOString();
+    let authorizationStatus = String(settings.authorization_status ?? "none").toLowerCase();
+    let authorizationCode = settings.authorization_code ?? null;
+    const authorizationReference = settings.authorization_reference ?? null;
+
+    if ((authorizationStatus !== "active" || !authorizationCode) && authorizationReference) {
+      const verifyResponse = await fetch(
+        `${PAYSTACK_VERIFY_AUTH_URL}/${encodeURIComponent(authorizationReference)}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${paystackSecret}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      const verifyPayload = await verifyResponse.json().catch(() => ({}));
+      if (verifyResponse.ok && verifyPayload?.status && verifyPayload?.data) {
+        const authData = verifyPayload.data;
+        const isActive = Boolean(authData.active);
+        authorizationCode = authData.authorization_code ?? authorizationCode ?? null;
+        authorizationStatus = isActive ? "active" : "created";
+
+        const updatePayload: Record<string, unknown> = {
+          authorization_status: authorizationStatus,
+          authorization_code: authorizationCode,
+          authorization_email:
+            authData.customer?.email ?? settings.authorization_email ?? userData.user.email ?? null,
+          updated_at: nowIso,
+        };
+
+        const activatedNow = authorizationStatus === "active" && !settings.authorization_active_at;
+        if (activatedNow) {
+          updatePayload.authorization_active_at = nowIso;
+        }
+
+        if (!settings.authorization_created_at) {
+          updatePayload.authorization_created_at = nowIso;
+        }
+
+        await getAdminClient()
+          .from("auto_topup_settings")
+          .update(updatePayload)
+          .eq("user_id", userId);
+
+        if (activatedNow) {
+          return new Response(JSON.stringify({ status: "mandate_wait" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
+
+    if (authorizationStatus !== "active" || !authorizationCode) {
+      const statusLabel = authorizationReference ? "mandate_pending" : "needs_mandate";
+      return new Response(JSON.stringify({ status: statusLabel }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    if (settings.authorization_active_at) {
+      const activeAtMs = new Date(settings.authorization_active_at).getTime();
+      if (!Number.isNaN(activeAtMs)) {
+        const hoursSinceActive = (Date.now() - activeAtMs) / (1000 * 60 * 60);
+        if (hoursSinceActive < 6) {
+          return new Response(JSON.stringify({ status: "mandate_wait" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
     }
 
     const { data: wallet, error: walletError } = await getAdminClient()

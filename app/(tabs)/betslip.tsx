@@ -16,6 +16,7 @@ import { useRouter } from "expo-router";
 import { Brand } from "@/constants/brand";
 import { BetSelection, useBetSlip } from "@/context/BetSlipContext";
 import { useAuth } from "@/context/AuthContext";
+import { useAutoReload } from "@/hooks/use-auto-reload";
 import { supabase } from "@/lib/supabase";
 import { Config } from "@/lib/config";
 
@@ -136,15 +137,20 @@ export default function BetSlipScreen() {
     return [open, settled] as const;
   }, [placedBets]);
 
-  const loadPlacedBets = useCallback(async () => {
+  const loadPlacedBets = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
     if (!user) {
       setPlacedBets([]);
       setPlacedError(null);
-      setPlacedLoading(false);
+      if (!silent) {
+        setPlacedLoading(false);
+      }
       return;
     }
 
-    setPlacedLoading(true);
+    if (!silent) {
+      setPlacedLoading(true);
+    }
     setPlacedError(null);
     const { data, error: betsError } = await supabase
       .from("bets")
@@ -160,7 +166,9 @@ export default function BetSlipScreen() {
 
     if (bets.length === 0) {
       setPlacedBets([]);
-      setPlacedLoading(false);
+      if (!silent) {
+        setPlacedLoading(false);
+      }
       return;
     }
 
@@ -201,7 +209,9 @@ export default function BetSlipScreen() {
     }));
 
     setPlacedBets(withLegs);
-    setPlacedLoading(false);
+    if (!silent) {
+      setPlacedLoading(false);
+    }
   }, [user]);
 
   const onRefresh = useCallback(async () => {
@@ -214,6 +224,11 @@ export default function BetSlipScreen() {
   useEffect(() => {
     loadPlacedBets();
   }, [loadPlacedBets]);
+
+  useAutoReload(() => loadPlacedBets({ silent: true }), {
+    intervalMs: 30000,
+    enabled: Boolean(user),
+  });
 
   const handlePlaceBet = async () => {
     if (!user) {

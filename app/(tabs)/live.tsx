@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Brand } from "@/constants/brand";
 import { useBetSlip } from "@/context/BetSlipContext";
+import { useAutoReload } from "@/hooks/use-auto-reload";
 import { OddsEvent, OddsScoreEvent, fetchFeaturedOdds, fetchLiveScores } from "@/lib/odds-api";
 import { BetSlipFab } from "@/components/BetSlipFab";
 
@@ -25,9 +26,21 @@ export default function LiveScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadLive = useCallback(async () => {
+  const formatLiveMinute = useCallback((commenceTime?: string | null) => {
+    if (!commenceTime) return null;
+    const commenceMs = new Date(commenceTime).getTime();
+    if (Number.isNaN(commenceMs)) return null;
+    const diffMinutes = Math.floor((Date.now() - commenceMs) / 60000);
+    if (diffMinutes <= 0) return "Live";
+    return `${diffMinutes}'`;
+  }, []);
+
+  const loadLive = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       const [events, scores] = await Promise.all([
         fetchFeaturedOdds("soccer_epl"),
         fetchLiveScores("soccer_epl", 1),
@@ -40,13 +53,17 @@ export default function LiveScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load live matches.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     loadLive();
   }, [loadLive]);
+
+  useAutoReload(() => loadLive({ silent: true }), { intervalMs: 30000 });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -78,21 +95,22 @@ export default function LiveScreen() {
           <Text style={styles.emptyText}>No live fixtures yet.</Text>
         ) : null}
         {liveMatches.map((match) => {
-          const h2hMarket = match.markets.find((market) => market.key === "h2h");
-          const score = liveScores.get(match.id);
-          const scoreMap = new Map(
-            (score?.scores ?? []).map((item) => [item.name?.toLowerCase(), item.score ?? "0"])
-          );
-          const homeScore = scoreMap.get(match.homeTeam.toLowerCase()) ?? "-";
-          const awayScore = scoreMap.get(match.awayTeam.toLowerCase()) ?? "-";
-          return (
-            <View key={match.id} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.league}>{match.sportTitle}</Text>
-                <Text style={styles.minute}>
-                  {score ? `${homeScore} - ${awayScore}` : "Live"}
-                </Text>
-              </View>
+      const h2hMarket = match.markets.find((market) => market.key === "h2h");
+      const score = liveScores.get(match.id);
+      const scoreMap = new Map(
+        (score?.scores ?? []).map((item) => [item.name?.toLowerCase(), item.score ?? "0"])
+      );
+      const homeScore = scoreMap.get(match.homeTeam.toLowerCase()) ?? "-";
+      const awayScore = scoreMap.get(match.awayTeam.toLowerCase()) ?? "-";
+      const minuteLabel = formatLiveMinute(match.commenceTime);
+      const scoreLabel = score ? `${homeScore} - ${awayScore}` : "Live";
+      const minuteText = minuteLabel ? `${minuteLabel} • ${scoreLabel}` : scoreLabel;
+      return (
+        <View key={match.id} style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.league}>{match.sportTitle}</Text>
+            <Text style={styles.minute}>{minuteText}</Text>
+          </View>
               <Text style={styles.teams}>
                 {match.homeTeam} vs {match.awayTeam}
               </Text>

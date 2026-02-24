@@ -293,6 +293,12 @@ export default function WalletScreen() {
         setAutoTopupNotice("Auto top-up requested. We'll update once it confirms.");
       } else if (status === "pending") {
         setAutoTopupNotice("Auto top-up is processing.");
+      } else if (status === "needs_mandate") {
+        setAutoTopupNotice("Link your bank account to enable auto top-up.");
+      } else if (status === "mandate_pending") {
+        setAutoTopupNotice("Mandate pending. Complete the bank authorization or wait for approval.");
+      } else if (status === "mandate_wait") {
+        setAutoTopupNotice("Mandate activated. Please wait a few hours before the first auto top-up.");
       }
 
       await loadAutoTopupAttempts();
